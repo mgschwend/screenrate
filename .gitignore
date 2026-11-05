@@ -7,3 +7,4 @@ web/public/imdb.sqlite.enc
 __pycache__/
 .venv/
 .DS_Store
+.claude/

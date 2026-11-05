@@ -14,7 +14,7 @@ Deployed to GitHub Pages: https://mgschwend.github.io/screenrate/
   - `meta`
 - **Encryption.** IMDb data is licensed for *individual personal use*, so the
   published file is encrypted. `scripts/encrypt_db.py` gzips the file, then encrypts it with AES-256-GCM. The key is derived with PBKDF2-SHA256 from the `DB_PASSPHRASE` repo secret, at 600k iterations with a fixed salt. The output is `imdb.sqlite.enc`, about 10 MB. The app asks for the passphrase once, decrypts with WebCrypto (`web/src/dbcrypto.js`) and keeps only a non-extractable key on the device. The repo, the Pages site and the CI artifacts only ever hold ciphertext.
-- **Loading.** The app loads the database with sql.js (WASM) and caches it in Cache Storage. The "Update data" button drops the cache entry and fetches the file again.
+- **Loading.** The app loads the database with the official SQLite WASM build (`@sqlite.org/sqlite-wasm`), deserialized in memory, and caches the encrypted file in Cache Storage. The "Update data" button drops the cache entry and fetches the file again. sql.js was the original plan, but its standard build has no FTS5, which `titles_fts` needs.
 - **OCR.** PaddleOCR runs through `ppu-paddle-ocr` and `onnxruntime-web` in a Web Worker. It uses WebGPU and falls back to WASM. It returns text lines with bounding boxes.
 - **Matching.** OCR text goes through `normalize()`, which is identical in Python and JS. Parity is tested in `web/test/normalize.test.js`. Lookup order:
   1. Exact `normTitle`, `normOriginal` or `akas.normTitle` match.
@@ -33,6 +33,8 @@ Deployed to GitHub Pages: https://mgschwend.github.io/screenrate/
 
   Choices the user makes are remembered in `localStorage` (normTitle → tconst).
 - **Posters (optional).** Fetched from TMDB `/find/{tconst}` when the user supplies an API key in settings.
+- **Offline.** `web/sw-template.js` becomes `sw.js` at build time. The service worker precaches the app shell and runtime-caches the OCR models (Hugging Face), the onnxruntime wasm (jsDelivr) and TMDB posters.
+- **Debugging.** The text field runs the same matching pipeline as the camera. In the console, `screenrate.snapshotFrom(canvas)` runs OCR on any image.
 - **UI.** The app has two states:
   - **Scanning:** live AR badges on the camera image, with the history list below.
   - **Paused:** the last frame is frozen with its badges still tappable.
@@ -44,6 +46,14 @@ Deployed to GitHub Pages: https://mgschwend.github.io/screenrate/
 ```
 scripts/build_imdb_db.py   IMDb TSV → imdb.sqlite
 scripts/encrypt_db.py      imdb.sqlite → imdb.sqlite.enc (and --decrypt)
+web/src/main.js            app state machine (idle/scanning/paused), camera loop, snapshot
+web/src/match.js           stop-list, Dice, resolve/disambiguation, context, phrases, voting
+web/src/titledb.js         SQL queries (exact / FTS5 prefix)
+web/src/dataload.js        cache → decrypt → sqlite; key storage
+web/src/frame.js           frame diff + TV preprocessing
+web/src/ocr*.js            PaddleOCR worker + client
+web/src/overlay.js         AR badges on canvas
+web/src/ui.js, store.js, tmdb.js  sheet/lists, localStorage, posters
 web/                       Vite + vanilla JS PWA
 .github/workflows/pages.yml  build data + web, deploy to Pages
                              (on push to main, weekly on Mondays, or manually)
