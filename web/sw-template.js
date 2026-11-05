@@ -25,7 +25,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
 
   if (url.origin === location.origin) {
-    if (url.pathname.endsWith('/imdb.sqlite.enc')) return;
+    if (url.pathname.endsWith('/imdb.sqlite.enc') || url.pathname.endsWith('/db-version.json')) return;
     if (req.mode === 'navigate') {
       e.respondWith(fetch(req).then((res) => {
         const copy = res.clone();

@@ -38,6 +38,7 @@
         <form id="search-form" class="searchbar" role="search" autocomplete="off">
           <input id="q" type="search" placeholder="Film or series title…" enterkeyhint="search"
                  autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Search titles">
+          <button id="nf-only" type="button" class="nf-toggle" aria-label="Only titles on Netflix" hidden>N</button>
         </form>
         <h3 id="list-head" class="list-head">Recently opened</h3>
         <ol id="results" class="list results" aria-live="polite"></ol>
@@ -56,6 +57,10 @@
           <label for="tmdb-key">TMDB API key <span class="muted">(optional: posters + recommendations)</span></label>
           <input id="tmdb-key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="v3 key or v4 read token">
         </div>
+        <div class="group row">
+          <label for="region">Netflix country</label>
+          <select id="region"></select>
+        </div>
         <div class="group">
           <h3>Data</h3>
           <dl id="stats" class="stats"></dl>
@@ -66,7 +71,7 @@
           <button id="clear-history" type="button">Clear recently opened</button>
           <button id="lock" type="button" class="danger">Forget passphrase</button>
         </div>
-        <p class="credit">Information courtesy of IMDb (<a href="https://www.imdb.com">https://www.imdb.com</a>). Used with permission. Personal, non-commercial use only.</p>
+        <p class="credit">Information courtesy of IMDb (<a href="https://www.imdb.com">https://www.imdb.com</a>). Used with permission. Personal, non-commercial use only. Streaming data: JustWatch (via TMDB).</p>
       </section>
     </main>
 

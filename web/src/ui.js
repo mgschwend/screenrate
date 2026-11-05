@@ -27,7 +27,7 @@ export function toast(msg, action) {
 // ---------- result rows (search results, recently opened, watchlist) ----------
 function rowHtml(t) {
   const sub = [t.year, typeLabel(t.type)].filter(Boolean).join(' · ');
-  return `<div class="t"><b>${esc(t.title)}</b>
+  return `<div class="t"><b>${t.netflix ? '<span class="nf" title="On Netflix">N</span>' : ''}${esc(t.title)}</b>
       <small>${esc(sub)}${t.akaTitle ? ` · <i>${esc(t.akaTitle)}</i>` : ''}</small></div>
     <div class="r"><span class="rating">★ ${fmtRating(t.rating)}</span>${t.votes ? `<small>${fmtVotes(t.votes)}</small>` : ''}</div>
     <a class="imdb" href="${imdbUrl(t.tconst)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(t.title)} on IMDb">IMDb</a>`;
@@ -114,7 +114,7 @@ function setupSheetOnce() {
 
 function cardHtml(c) {
   return `<button type="button" class="card" data-tconst="${esc(c.tconst)}">
-    <div class="poster" data-poster="${esc(c.tconst)}">${esc(c.title)}</div>
+    <div class="poster-wrap"><div class="poster" data-poster="${esc(c.tconst)}">${esc(c.title)}</div>${c.netflix ? '<span class="nf nf-card">N</span>' : ''}</div>
     <span><b>${esc(c.title)}</b>${esc(c.year ?? '')} · ★ ${fmtRating(c.rating)}</span></button>`;
 }
 
@@ -140,7 +140,20 @@ function stripSection(id, heading, rows) {
  * @param recommend Promise of TMDB recommendations (optional; shown on top when it resolves non-empty)
  * @param onOpen    open another title (a tapped card)
  */
-export function openSheet({ title, similar = [], recommend, onOpen, onClose }) {
+/**
+ * Netflix line: precomputed status (weekly) replaced by the live TMDB check when it resolves.
+ * netflix = {region, on: boolean|null, asOf}  — on=null → no precomputed data for this region
+ */
+function netflixHtml(netflix) {
+  if (!netflix || netflix.on == null) return '';
+  return `<p class="avail ${netflix.on ? 'yes' : 'no'}">${netflix.on ? '<span class="nf">N</span> On Netflix' : 'Not on Netflix'}
+    (${esc(netflix.region)})<small> · as of ${esc(netflix.asOf || '–')}</small></p><p class="jw">Streaming data: JustWatch (via TMDB)</p>`;
+}
+
+let markNetflix = (t) => t;
+export function setNetflixMarker(fn) { markNetflix = fn; }
+
+export function openSheet({ title, similar = [], recommend, netflix, providers, onOpen, onClose }) {
   setupSheetOnce();
   sheetOnClose = onClose || null;
   const body = $('#sheet-body');
@@ -158,6 +171,7 @@ export function openSheet({ title, similar = [], recommend, onOpen, onClose }) {
       <a href="${imdbUrl(title.tconst)}" target="_blank" rel="noopener noreferrer">IMDb</a>
       <a href="https://letterboxd.com/imdb/${esc(title.tconst)}/" target="_blank" rel="noopener noreferrer">Letterboxd</a>
     </div>
+    <div id="avail">${netflixHtml(netflix)}</div>
     <button type="button" class="wl-btn ${inWl ? 'on' : ''}">${inWl ? '✓ On watchlist' : '+ Add to watchlist'}</button>
     ${stripSection('recs', 'Recommended (TMDB)', [])}
     ${stripSection('similar', 'Similar', similar)}`;
@@ -176,10 +190,19 @@ export function openSheet({ title, similar = [], recommend, onOpen, onClose }) {
   };
   wireCards(body);
 
+  providers?.then((p) => {
+    const box = body.querySelector('#avail');
+    if (!p || !box?.isConnected || $('#sheet-title')?.textContent !== title.title) return;
+    const list = p.flatrate.length ? p.flatrate.map(esc).join(', ') : 'no subscription service';
+    box.innerHTML = `<p class="avail ${p.netflix ? 'yes' : 'no'}">${p.netflix ? '<span class="nf">N</span> On Netflix' : 'Not on Netflix'} (${esc(netflix?.region || '')}) <small>· live</small></p>
+      <p class="streams">Streaming in ${esc(netflix?.region || '')}: ${p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener noreferrer">${list}</a>` : list}</p>
+      <p class="jw">Streaming data: JustWatch (via TMDB)</p>`;
+  });
+
   recommend?.then((rows) => {
     const sec = body.querySelector('#recs');
     if (!rows.length || !sec?.isConnected || $('#sheet-title')?.textContent !== title.title) return;
-    sec.outerHTML = stripSection('recs', 'Recommended (TMDB)', rows);
+    sec.outerHTML = stripSection('recs', 'Recommended (TMDB)', rows.map(markNetflix));
     wireCards(body.querySelector('#recs'));
   });
 

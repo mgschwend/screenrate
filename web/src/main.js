@@ -2,10 +2,24 @@ import './style.css';
 import { openDatabase, forgetKey } from './dataload.js';
 import { searchTitles, MIN_CHARS } from './search.js';
 import { history, settings, posterCache } from './store.js';
-import { recommendationsFor } from './tmdb.js';
-import { $, toast, renderRows, renderWatchlist, openSheet, closeSheet } from './ui.js';
+import { recommendationsFor, providersFor } from './tmdb.js';
+import { $, toast, renderRows, renderWatchlist, openSheet, closeSheet, setNetflixMarker } from './ui.js';
 
 let tdb = null;
+let netflix = new Set();   // tconsts on Netflix in the chosen region (precomputed weekly)
+let netflixRegion = null;  // null → no Netflix data in this DB for the chosen region
+
+function loadNetflix() {
+  const { region } = settings.get();
+  const regions = tdb.netflixRegions();
+  netflixRegion = regions.includes(region) ? region : regions[0] || null;
+  netflix = netflixRegion ? tdb.netflixSet(netflixRegion) : new Set();
+  $('#nf-only').hidden = !netflixRegion;
+  $('#nf-only').classList.toggle('on', !!netflixRegion && settings.get().netflixOnly);
+  $('#nf-only').textContent = netflixRegion ? `N ${netflixRegion}` : 'N';
+}
+const mark = (t) => ({ ...t, netflix: netflix.has(t.tconst) });
+setNetflixMarker(mark);
 
 // =============== boot / unlock ===============
 async function boot() {
@@ -54,10 +68,20 @@ $('#unlock-form').addEventListener('submit', async (e) => {
 function startApp() {
   $('#boot').hidden = true;
   $('#app').hidden = false;
+  loadNetflix();
   showResults();
   renderSettings();
-  // DB cached by an older app version (before similar titles)? Refresh it once in the background.
-  if (!tdb.hasSimilar()) refreshData({ quiet: true });
+  checkForNewData();
+}
+
+/** CI publishes db-version.json next to the DB; re-download quietly when it differs from the cached DB. */
+async function checkForNewData() {
+  try {
+    const res = await fetch(new URL('db-version.json', document.baseURI), { cache: 'no-store' });
+    if (!res.ok) { if (!tdb.hasSimilar()) refreshData({ quiet: true }); return; }
+    const { built_at: remote } = await res.json();
+    if (remote && remote !== tdb.meta().built_at) refreshData({ quiet: true });
+  } catch { /* offline: keep the cached DB */ }
 }
 
 // =============== tabs ===============
@@ -82,19 +106,28 @@ function showResults() {
     const recent = history.all().reverse();
     $('#list-head').textContent = 'Recently opened';
     $('#list-head').hidden = recent.length === 0;
-    renderRows(list, recent, openTitle);
+    renderRows(list, recent.map(mark), openTitle);
     empty.hidden = recent.length > 0;
     empty.textContent = 'Type a film or series title — results appear as you type.';
     return;
   }
-  const rows = searchTitles(tdb, text);
+  const nfOnly = !!netflixRegion && settings.get().netflixOnly;
+  let rows = searchTitles(tdb, text, nfOnly ? 300 : 30).map(mark);
+  if (nfOnly) rows = rows.filter((r) => r.netflix).slice(0, 30);
   $('#list-head').hidden = false;
-  $('#list-head').textContent = rows.length ? `${rows.length}${rows.length === 30 ? '+' : ''} results` : 'No results';
+  $('#list-head').textContent = (rows.length ? `${rows.length}${rows.length === 30 ? '+' : ''} result${rows.length === 1 ? '' : 's'}` : 'No results')
+    + (nfOnly ? ` on Netflix ${netflixRegion}` : '');
   renderRows(list, rows, openTitle);
   list.scrollTop = 0;
   empty.hidden = rows.length > 0;
-  empty.textContent = `Nothing found for “${text}”.`;
+  empty.textContent = nfOnly ? `Nothing on Netflix ${netflixRegion} for “${text}”. Tap “N” to show everything.` : `Nothing found for “${text}”.`;
 }
+
+$('#nf-only').addEventListener('click', () => {
+  settings.set({ netflixOnly: !settings.get().netflixOnly });
+  loadNetflix();
+  showResults();
+});
 
 // =============== detail ===============
 /** Open a title (row object or tconst): detail sheet with similar titles; remembers it as recently opened. */
@@ -104,9 +137,13 @@ function openTitle(t) {
   history.add(title);
   let similar = tdb.similar(title.tconst);
   if (!similar.length) similar = tdb.sameGenre(title.tconst);
+  const asOf = tdb.meta().netflix_built_at;
   openSheet({
-    title,
-    similar,
+    title: mark(title),
+    similar: similar.map(mark),
+    netflix: { region: netflixRegion || settings.get().region, on: netflixRegion ? netflix.has(title.tconst) : null,
+      asOf: asOf ? new Date(asOf.replace(' ', 'T') + 'Z').toLocaleDateString('de-CH') : '' },
+    providers: providersFor(title.tconst, netflixRegion || settings.get().region),
     recommend: recommendationsFor(tdb, title.tconst),
     onOpen: openTitle,
     onClose: () => { if (!q.value.trim()) showResults(); if (!$('#view-watchlist').hidden) renderWatchlist(openTitle); },
@@ -123,12 +160,18 @@ function renderSettings() {
     const num = (v) => (v ? Number(v).toLocaleString('de-CH') : '–');
     $('#stats').innerHTML = `<dt>Built</dt><dd>${built}</dd><dt>Titles</dt><dd>${num(m.title_count)}</dd>
       <dt>DE/CH/AT titles</dt><dd>${num(m.aka_count)}</dd><dt>Similar lists</dt><dd>${num(m.similar_count)}</dd>
-      <dt>Min. votes</dt><dd>${m.min_votes ?? '–'}</dd>`;
+      <dt>Min. votes</dt><dd>${m.min_votes ?? '–'}</dd>
+      <dt>Netflix</dt><dd>${netflixRegion ? `${num(m[`netflix_${netflixRegion}_count`])} titles in ${netflixRegion}` : 'no data yet'}</dd>`;
+    const regions = tdb.netflixRegions();
+    const sel = $('#region');
+    const all = [...new Set([...regions, s.region])];
+    sel.innerHTML = all.map((r) => `<option value="${r}" ${r === s.region ? 'selected' : ''}>${r}${regions.includes(r) ? '' : ' (no data)'}</option>`).join('');
   }
   $('#clear-history').textContent = `Clear recently opened (${history.all().length})`;
 }
 
 $('#tmdb-key').addEventListener('change', (e) => { settings.set({ tmdbKey: e.target.value.trim() }); posterCache.clear(); toast('Saved'); });
+$('#region').addEventListener('change', (e) => { settings.set({ region: e.target.value }); loadNetflix(); renderSettings(); showResults(); });
 $('#clear-history').addEventListener('click', () => { history.clear(); renderSettings(); showResults(); toast('Cleared'); });
 $('#lock').addEventListener('click', async () => { await forgetKey(); location.reload(); });
 $('#update-data').addEventListener('click', () => refreshData({ quiet: false }));
@@ -140,6 +183,7 @@ async function refreshData({ quiet }) {
     const fresh = await openDatabase({ force: true, onProgress: (g, t) => { prog.hidden = false; prog.value = t ? g / t : 0; } });
     tdb?.db.close();
     tdb = fresh;
+    loadNetflix();
     renderSettings();
     showResults();
     if (!quiet) toast('Data updated');

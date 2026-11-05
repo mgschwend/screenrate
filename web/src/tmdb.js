@@ -67,3 +67,20 @@ export function recommendationsFor(tdb, tconst, limit = 10) {
   }
   return recCache.get(tconst);
 }
+
+/**
+ * Live streaming availability for one title in `region` (TMDB watch providers, data by JustWatch).
+ * @returns {Promise<{flatrate: string[], netflix: boolean, link: string}|null>} null without key / not found.
+ */
+export async function providersFor(tconst, region) {
+  if (!key()) return null;
+  try {
+    const f = await find(tconst);
+    if (!f) return null;
+    const j = await api(`/${f.media}/${f.id}/watch/providers`);
+    const r = j.results?.[region];
+    const flatrate = [...(r?.flatrate || []), ...(r?.ads || [])].map((p) => p.provider_name);
+    const unique = [...new Set(flatrate)];
+    return { flatrate: unique, netflix: unique.some((n) => /^netflix/i.test(n)), link: r?.link || '' };
+  } catch { return null; }
+}

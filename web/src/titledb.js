@@ -82,6 +82,20 @@ export class TitleDb {
     } catch { return []; }
   }
 
+  /** Regions with precomputed Netflix data (scripts/add_netflix.py), e.g. ['CH']; [] if none. */
+  netflixRegions() {
+    try { return (this.db.selectValue("SELECT value FROM meta WHERE key = 'netflix_regions'") || '').split(',').filter(Boolean); }
+    catch { return []; }
+  }
+
+  /** Set of tconsts on Netflix (subscription) in `region`. */
+  netflixSet(region) {
+    try {
+      return new Set(this.db.selectValues('SELECT id FROM netflix WHERE region = ?', [region])
+        .map((n) => `tt${String(n).padStart(7, '0')}`));
+    } catch { return new Set(); }
+  }
+
   hasSimilar() {
     try { return !!this.db.selectValue("SELECT 1 FROM sqlite_master WHERE name = 'similar'"); } catch { return false; }
   }

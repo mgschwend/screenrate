@@ -26,6 +26,8 @@ Deployed to GitHub Pages: https://mgschwend.github.io/screenrate/
 
   Within each group, more IMDb votes ranks higher. Queries take about 10 ms.
 - **Similar titles.** `scripts/add_similar.py` runs in CI and adds `titles.genres` plus a `similar` table with the top 10 titles per film. The score combines shared directors (weight 3), writers (2) and lead cast (1–1.5), genre overlap and a small popularity prior. If a title has no list, the app falls back to the most-voted titles of the same genre. With a TMDB key, TMDB recommendations appear on top, each mapped back to a local IMDb rating.
+- **Netflix availability.** `scripts/add_netflix.py` runs weekly in CI using the `TMDB_API_KEY` repo secret. It pulls the Netflix catalogue for each region (currently CH) from TMDB `/discover`, where the data comes from JustWatch. It maps the results to IMDb ids via `/external_ids`, with the id map kept in the Actions cache, and stores them in the `netflix` table. The app then shows an **N** badge on results and similar titles, offers a "Netflix only" filter, and shows the status on the detail page. With a TMDB key on the phone, the detail page also runs a live check listing every subscription service. Without the secret, the step is skipped and the Netflix UI is hidden. Attribution "Streaming data: JustWatch (via TMDB)" is shown wherever availability appears.
+- **Data updates.** CI also publishes `db-version.json`, which contains only the build timestamp. When it changes, the app quietly downloads the new DB.
 - **Posters (optional).** Fetched from TMDB `/find/{tconst}` when you supply your own key in Settings.
 - **Offline.** The service worker precaches the app shell; posters are runtime-cached.
 
@@ -35,6 +37,7 @@ Deployed to GitHub Pages: https://mgschwend.github.io/screenrate/
 scripts/build_imdb_db.py   IMDb TSV → imdb.sqlite
 scripts/encrypt_db.py      imdb.sqlite → imdb.sqlite.enc (and --decrypt)
 scripts/add_similar.py     genres + similar titles (IMDb principals)
+scripts/add_netflix.py     Netflix availability per region (TMDB / JustWatch)
 web/src/main.js            boot/unlock, live search, detail, settings
 web/src/search.js          ranked search-as-you-type
 web/src/match.js           normalize helpers, Dice, title resolution (used by search fallback)
@@ -50,6 +53,7 @@ web/                       Vite + vanilla JS PWA
 
 ```bash
 gh secret set DB_PASSPHRASE -R mgschwend/screenrate   # prompts; choose a long passphrase
+gh secret set TMDB_API_KEY -R mgschwend/screenrate    # prompts; enables Netflix availability
 ```
 
 Local build:
@@ -58,6 +62,7 @@ Local build:
 pip install pandas numpy cryptography
 python scripts/build_imdb_db.py --akas
 python scripts/add_similar.py imdb.sqlite
+TMDB_API_KEY=… python scripts/add_netflix.py imdb.sqlite --regions CH
 DB_PASSPHRASE=… python scripts/encrypt_db.py imdb.sqlite web/public/imdb.sqlite.enc
 cd web && npm install && npm run dev
 ```

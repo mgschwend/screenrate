@@ -9,3 +9,5 @@ __pycache__/
 .DS_Store
 .claude/
 web/public/testframes/
+.tmdb_imdb_map.json
+web/public/db-version.json

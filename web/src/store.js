@@ -14,7 +14,7 @@ const write = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
 const SETTINGS_SCHEMA = 3;
 export const settings = {
-  defaults: { tmdbKey: '', schema: SETTINGS_SCHEMA },
+  defaults: { tmdbKey: '', region: 'CH', netflixOnly: false, schema: SETTINGS_SCHEMA },
   get() {
     const stored = read(K.settings, {});
     if (stored.schema !== SETTINGS_SCHEMA) { // migrate: keep only what still exists

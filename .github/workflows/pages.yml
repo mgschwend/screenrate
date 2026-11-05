@@ -44,6 +44,18 @@ jobs:
       - name: Add genres + similar titles
         run: python scripts/add_similar.py "$RUNNER_TEMP/imdb.sqlite" --cache "$RUNNER_TEMP/imdb_cache"
 
+      - name: Cache TMDB→IMDb id map
+        uses: actions/cache@v6
+        with:
+          path: .tmdb_imdb_map.json
+          key: tmdb-imdb-map-${{ github.run_id }}
+          restore-keys: tmdb-imdb-map-
+
+      - name: Add Netflix availability (TMDB / JustWatch)
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: python scripts/add_netflix.py "$RUNNER_TEMP/imdb.sqlite" --regions CH --map-cache .tmdb_imdb_map.json
+
       - name: Encrypt database
         env:
           DB_PASSPHRASE: ${{ secrets.DB_PASSPHRASE }}
@@ -53,6 +65,8 @@ jobs:
             exit 1
           fi
           python scripts/encrypt_db.py "$RUNNER_TEMP/imdb.sqlite" web/public/imdb.sqlite.enc
+          # tiny unencrypted version marker so installed apps notice a new DB (contains no IMDb data)
+          python -c "import sqlite3,json,sys; v=sqlite3.connect(sys.argv[1]).execute(\"SELECT value FROM meta WHERE key='built_at'\").fetchone()[0]; json.dump({'built_at': v}, open('web/public/db-version.json','w'))" "$RUNNER_TEMP/imdb.sqlite"
 
       - name: Build web app
         run: npm run build

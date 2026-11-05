@@ -32,6 +32,10 @@ before(async () => {
   for (const r of ROWS) db.exec({ sql: 'INSERT INTO titles VALUES (?,?,?,?,?,?,?,?,?)', bind: [...r, normalize(r[2]), normalize(r[3])] });
   for (const a of AKAS) db.exec({ sql: 'INSERT INTO akas VALUES (?,?,?,?)', bind: [...a, normalize(a[1])] });
   db.exec('INSERT INTO titles_fts(normTitle, normOriginal, tconst) SELECT normTitle, normOriginal, tconst FROM titles');
+  db.exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE netflix (region TEXT NOT NULL, id INTEGER NOT NULL, PRIMARY KEY (region, id)) WITHOUT ROWID;
+    INSERT INTO meta VALUES ('netflix_regions', 'CH');
+    INSERT INTO netflix VALUES ('CH', 903747), ('CH', 15239678);`);
   tdb = new TitleDb(db);
 });
 
@@ -67,4 +71,13 @@ test('typo fallback', () => {
 test('too short / nonsense', () => {
   assert.deepEqual(ids('d'), []);
   assert.deepEqual(ids('zzzzqq'), []);
+});
+
+test('Netflix availability per region', () => {
+  assert.deepEqual(tdb.netflixRegions(), ['CH']);
+  const ch = tdb.netflixSet('CH');
+  assert.ok(ch.has('tt0903747'));   // 7-digit id padded
+  assert.ok(ch.has('tt15239678'));  // 8-digit id
+  assert.ok(!ch.has('tt1160419'));
+  assert.equal(tdb.netflixSet('DE').size, 0);
 });
