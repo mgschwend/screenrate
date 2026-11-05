@@ -35,6 +35,7 @@ Deployed to GitHub Pages: https://mgschwend.github.io/screenrate/
 - **Posters (optional).** Fetched from TMDB `/find/{tconst}` when the user supplies an API key in settings.
 - **Offline.** `web/sw-template.js` becomes `sw.js` at build time. The service worker precaches the app shell and runtime-caches the OCR models (Hugging Face), the onnxruntime wasm (jsDelivr) and TMDB posters.
 - **Debugging.** The text field runs the same matching pipeline as the camera. In the console, `screenrate.snapshotFrom(canvas)` runs OCR on any image.
+- **UI change (2026-11-05):** the AR rating badges on the camera image were replaced by an **"On screen now" list** under the viewfinder, because badges on a hand-held live image weren't smooth. The list keeps first-seen order and drops a title about 2 s after it leaves the frame. The camera image only shows thin outlines around the text OCR reads.
 - **UI.** The app has two states:
   - **Scanning:** live AR badges on the camera image, with the history list below.
   - **Paused:** the last frame is frozen with its badges still tappable.

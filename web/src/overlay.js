@@ -80,24 +80,15 @@ export class Overlay {
     }
   }
 
-  /** Outline every OCR line with its text + confidence; matched lines in yellow. */
+  /** Thin outline around every OCR line (feedback that the camera reads text); matched lines in yellow. */
   drawDebug({ items, matched }, s, ox, oy) {
     const ctx = this.ctx;
     ctx.save();
-    ctx.lineWidth = 1;
-    ctx.font = '500 10px -apple-system, system-ui, sans-serif';
-    ctx.textBaseline = 'bottom';
     for (const it of items) {
-      const x = ox + it.box.x * s, y = oy + it.box.y * s, w = it.box.width * s, h = it.box.height * s;
-      const hitColor = matched?.has(it);
-      ctx.strokeStyle = hitColor ? 'rgba(245,197,24,.95)' : 'rgba(120,200,255,.8)';
-      ctx.strokeRect(x, y, w, h);
-      const label = `${it.text} ${Math.round(it.confidence * 100)}%`;
-      const tw = ctx.measureText(label).width + 6;
-      ctx.fillStyle = 'rgba(0,0,0,.65)';
-      ctx.fillRect(x, y - 13, tw, 13);
-      ctx.fillStyle = hitColor ? '#f5c518' : '#9fd8ff';
-      ctx.fillText(label, x + 3, y - 1);
+      const hit = matched?.has(it);
+      ctx.lineWidth = hit ? 2 : 1;
+      ctx.strokeStyle = hit ? 'rgba(245,197,24,.95)' : 'rgba(255,255,255,.35)';
+      ctx.strokeRect(ox + it.box.x * s, oy + it.box.y * s, it.box.width * s, it.box.height * s);
     }
     ctx.restore();
   }

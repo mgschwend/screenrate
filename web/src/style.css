@@ -53,7 +53,7 @@ progress { width: 100%; accent-color: var(--accent); }
   position: relative; flex: none; height: 38vh; background: #050505; overflow: hidden;
   transition: height .25s ease; touch-action: none; /* pinch = camera zoom, not page zoom */
 }
-body[data-state=scanning] .viewfinder { height: 66vh; }
+body[data-state=scanning] .viewfinder { height: 46vh; }
 body[data-state=paused] .viewfinder { height: 30vh; }
 .viewfinder video, .viewfinder canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .viewfinder video { opacity: 0; pointer-events: none; } /* frames are painted onto #overlay */
@@ -174,3 +174,16 @@ body[data-state=scanning] .vf-status::before { background: #34c759; }
 body[data-state=scanning] .viewfinder::after {
   content: ''; position: absolute; inset: 0; border: 2px solid rgba(52,199,89,.55); pointer-events: none;
 }
+
+/* lists under the viewfinder */
+.list-head {
+  margin: 0; padding: .45rem 1rem .3rem; font-size: .72rem; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); background: var(--bg); border-bottom: 1px solid var(--line); flex: none;
+}
+.list-head .count { color: var(--accent); margin-left: .3rem; }
+.onscreen { flex: none; max-height: 30vh; background: #0b0b0b; }
+.onscreen:empty::before {
+  content: 'Point the camera at the TV — recognised titles appear here.'; display: block; color: var(--muted);
+  padding: .8rem 1rem; font-size: .85rem;
+}
+body[data-state=paused] .onscreen { max-height: 24vh; }

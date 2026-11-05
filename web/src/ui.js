@@ -58,6 +58,25 @@ export function refreshHistoryRow(r) {
   if (li) li.innerHTML = historyRowHtml(r);
 }
 
+// ---------- on screen now ----------
+/** entries: [{data:{res, text}, firstSeen}] — rendered in first-seen order so rows never jump. */
+export function renderOnScreen(entries, onOpen) {
+  const ol = $('#onscreen');
+  const sorted = [...entries].sort((a, b) => a.firstSeen - b.firstSeen);
+  ol.innerHTML = '';
+  for (const e of sorted) {
+    const { res, text } = e.data;
+    const w = res.winner;
+    const li = document.createElement('li');
+    li.innerHTML = w
+      ? `<div class="t"><b>${esc(w.title)}</b><small>${[w.year, typeLabel(w.type)].filter(Boolean).join(' · ')}${res.alternatives ? ` · ${res.alternatives} other match${res.alternatives > 1 ? 'es' : ''}` : ''}</small></div><span class="rating">${fmtRating(w.rating)}</span>`
+      : `<div class="t"><b>${esc(res.candidates[0]?.title || text)}</b><small>${res.candidates.length} matches · tap to pick</small></div><span class="rating q">?</span>`;
+    li.onclick = () => onOpen(e.data);
+    ol.append(li);
+  }
+  $('#onscreen-count').textContent = sorted.length ? String(sorted.length) : '';
+}
+
 // ---------- watchlist ----------
 export function renderWatchlist(onOpen) {
   const rows = watchlist.all();

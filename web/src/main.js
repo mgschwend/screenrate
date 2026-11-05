@@ -7,7 +7,7 @@ import { initOcr, recognize, ocrState } from './ocr.js';
 import { Overlay } from './overlay.js';
 import { history, watchlist, remembered, settings, posterCache } from './store.js';
 import {
-  $, toast, renderHistory, appendHistory, refreshHistoryRow, renderWatchlist, openSheet, closeSheet, fmtRating,
+  $, toast, renderHistory, appendHistory, refreshHistoryRow, renderWatchlist, openSheet, closeSheet, fmtRating, renderOnScreen,
 } from './ui.js';
 
 let tdb = null;
@@ -23,7 +23,8 @@ const S = {
   frameNo: 0,
   prevThumb: null,
   voter: new Voter(2, 8),
-  badges: [],              // [{box, label, ambiguous, data}] in raw-frame px
+  badges: [],              // [{box, label, ambiguous, data}] in raw-frame px (current confirmed matches)
+  onScreen: new Map(),     // voteKey → {data, firstSeen, lastSeen}: the "On screen now" list
   frameSize: [0, 0],
   lookups: new Map(),      // cache key → resolve() result
   sessionSeen: new Map(),  // dedupe key → history row id (this app run)
@@ -130,7 +131,7 @@ function paintLive() {
     // badges/boxes refer to the last OCR'd crop; if zoom changed since, hide them until the next OCR
     const same = S.frameSize[0] === f.sw && S.frameSize[1] === f.sh;
     if (!same) overlay.debug = null;
-    overlay.render(same ? S.badges : [], f.sw, f.sh, f);
+    overlay.render([], f.sw, f.sh, f);
   }
   requestAnimationFrame(paintLive);
 }
@@ -218,6 +219,8 @@ async function startScanning() {
   S.badges = [];
   S.prevThumb = null;
   S.lastMatches = [];
+  S.onScreen.clear();
+  renderOnScreen([], () => {});
   S.ocrItems = null;
   overlay.debug = null;
   S.voter.reset();
@@ -233,7 +236,7 @@ function pause() {
   setMode('paused');
   stopCamera();
   showStats();
-  requestAnimationFrame(() => overlay.render(S.badges, ...S.frameSize, raw.width ? raw : null));
+  requestAnimationFrame(() => overlay.render([], ...S.frameSize, raw.width ? raw : null));
 }
 
 let ocrReady = null;
@@ -269,12 +272,14 @@ async function loop(id) {
 async function scanFrame({ snapshot, id }) {
   if (!grabFrame(video, raw, digitalZoom())) return;
   const { thumb, diff } = thumbDiff(raw, S.prevThumb);
-  if (!snapshot && diff < DIFF_THRESHOLD) {
+  const stale = performance.now() - (S.lastOcrAt || 0) > 2000; // re-read at least every 2 s anyway
+  if (!snapshot && diff < DIFF_THRESHOLD && !stale) {
     // Nothing changed: no OCR, but the previous frame's titles count as seen again (voting on static screens).
     if (S.lastMatches.length) { S.frameNo++; showMatches(S.lastMatches, { snapshot: false }); }
     return;
   }
   S.prevThumb = thumb;
+  S.lastOcrAt = performance.now();
   await ocrRaw({ snapshot, id });
 }
 
@@ -334,7 +339,22 @@ function showMatches(matches, { snapshot }) {
     return { box: m.box, ...badgeLabel(m.res), data: { res: m.res, text: m.text, rowId } };
   });
   S.frameSize = [raw.width, raw.height];
-  if (S.mode === 'paused' || snapshot) overlay.render(S.badges, raw.width, raw.height, raw);
+  updateOnScreen({ snapshot });
+  if (S.mode === 'paused' || snapshot) overlay.render([], raw.width, raw.height, raw);
+}
+
+const ONSCREEN_TTL = 6; // frames (~2 s at 3 fps) a title stays listed after it was last seen
+
+/** Keep a stable list: new titles append at the bottom, rows never reorder, stale ones drop out. */
+function updateOnScreen({ snapshot }) {
+  if (snapshot) S.onScreen.clear();
+  for (const b of S.badges) {
+    const k = voteKey(b.data);
+    const e = S.onScreen.get(k);
+    if (e) { e.lastSeen = S.frameNo; e.data = b.data; } else S.onScreen.set(k, { data: b.data, firstSeen: S.frameNo, lastSeen: S.frameNo });
+  }
+  if (!snapshot) for (const [k, e] of S.onScreen) if (S.frameNo - e.lastSeen > ONSCREEN_TTL) S.onScreen.delete(k);
+  renderOnScreen([...S.onScreen.values()], (data) => { pause(); openMatch(data); });
 }
 
 const voteKey = (m) => m.res.winner?.tconst || `?${m.res.candidates[0]?.tconst || m.res.norm}`;
@@ -342,10 +362,7 @@ const voteKey = (m) => m.res.winner?.tconst || `?${m.res.candidates[0]?.tconst |
 /** "● webgpu · 420 ms · 12 lines · 3 matches · 2 shown" */
 function showStats() {
   if (!settings.get().showBoxes && S.mode === 'scanning') { status(''); return; }
-  const parts = [ocrState.backend, ocrState.lastMs != null && `${ocrState.lastMs} ms`,
-    S.ocrItems && `${S.ocrItems.length} lines`, S.lastMatches && `${S.lastMatches.length} matches`,
-    S.mode === 'scanning' && `${S.shownCount || 0} shown`].filter(Boolean);
-  status(parts.join(' · '));
+  status(S.mode === 'scanning' ? 'Scanning' : '');
 }
 
 function badgeLabel(res) {
@@ -391,9 +408,8 @@ $('#shutter').addEventListener('click', async (e) => {
 $('#viewfinder').addEventListener('click', (e) => {
   if (e.target.closest('button')) return;
   if (performance.now() - lastPinchEnd < 400) return; // end of a pinch, not a tap
-  const hit = overlay.hit(e.clientX, e.clientY);
-  if (hit) { pause(); openMatch(hit); return; }
-  if (S.mode !== 'scanning') startScanning();
+  if (S.mode === 'scanning') $('#shutter').click(); // tap while live = freeze + scan this frame
+  else startScanning();
 });
 $('#resume').addEventListener('click', (e) => { e.stopPropagation(); startScanning(); });
 
@@ -452,7 +468,7 @@ window.addEventListener('deviceorientation', (e) => {
 // Re-draw whenever the viewfinder changes size (pause/resume height transition, rotation).
 new ResizeObserver(() => {
   if (!S.frameSize[0] || S.mode === 'scanning') return; // live: painter redraws every frame
-  overlay.render(S.badges, ...S.frameSize, S.mode === 'paused' ? raw : null);
+  overlay.render([], ...S.frameSize, S.mode === 'paused' ? raw : null);
 }).observe($('#viewfinder'));
 
 // =============== detail / picker ===============
@@ -480,7 +496,9 @@ function onUserChoice(norm, chosen, rowId) {
     const res = { ...b.data.res, winner: chosen, ambiguous: false, how: 'remembered' };
     return { ...b, ...badgeLabel(res), data: { ...b.data, res } };
   });
-  if (S.mode === 'paused') overlay.render(S.badges, ...S.frameSize, raw);
+  for (const e of S.onScreen.values()) if (e.data.res.norm === norm) e.data = { ...e.data, res: chosenRes(e.data.res) };
+  renderOnScreen([...S.onScreen.values()], (data) => { pause(); openMatch(data); });
+  if (S.mode === 'paused') overlay.render([], ...S.frameSize, raw);
 }
 
 function openHistoryRow(row) {

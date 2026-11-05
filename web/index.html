@@ -45,9 +45,12 @@
           <button id="share-debug" class="vf-share" type="button" aria-label="Share debug frame">Share frame</button>
           <button id="shutter" class="shutter" type="button" aria-label="Snapshot"></button>
         </div>
+        <h3 class="list-head">On screen now <span id="onscreen-count" class="count"></span></h3>
+        <ol id="onscreen" class="list onscreen"></ol>
         <form id="manual" class="manual" autocomplete="off">
           <input id="manual-input" type="search" placeholder="Type a title…" enterkeyhint="search" autocapitalize="off" spellcheck="false">
         </form>
+        <h3 class="list-head">History</h3>
         <ol id="history" class="list history"></ol>
       </section>
 
@@ -72,7 +75,7 @@
           <input id="preprocess" type="checkbox">
         </div>
         <div class="group row">
-          <label for="show-boxes">Show OCR boxes <span class="muted">(what the camera reads)</span></label>
+          <label for="show-boxes">Show text outlines <span class="muted">(what the camera reads)</span></label>
           <input id="show-boxes" type="checkbox">
         </div>
         <div class="group">

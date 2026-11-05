@@ -1,7 +1,10 @@
 // Frame capture, change detection and preprocessing for TV screens (light text on dark UI).
 export const WORK_WIDTH = 960;
 const THUMB = 32;
-export const DIFF_THRESHOLD = 6; // mean abs grey difference (0–255) below which a frame counts as unchanged
+// A frame counts as changed when ≥ DIFF_THRESHOLD of the 32×32 thumbnail cells changed by > CELL_DELTA grey levels.
+// (A mean over all cells missed small text changes on dark TV UIs, e.g. a row scrolling.)
+export const DIFF_THRESHOLD = 4;
+const CELL_DELTA = 20;
 
 const thumbCanvas = new OffscreenCanvas(THUMB, THUMB);
 const thumbCtx = thumbCanvas.getContext('2d', { willReadFrequently: true });
@@ -19,7 +22,7 @@ export function grabFrame(video, into, z = 1) {
   return into;
 }
 
-/** 32×32 grey thumbnail; returns {thumb, diff} where diff compares with `prev` (Infinity if none). */
+/** 32×32 grey thumbnail; returns {thumb, diff} — diff = number of changed cells vs `prev` (Infinity if none). */
 export function thumbDiff(source, prev) {
   thumbCtx.drawImage(source, 0, 0, THUMB, THUMB);
   const d = thumbCtx.getImageData(0, 0, THUMB, THUMB).data;
@@ -27,9 +30,9 @@ export function thumbDiff(source, prev) {
   let sum = 0;
   for (let i = 0, j = 0; i < d.length; i += 4, j++) {
     thumb[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
-    if (prev) sum += Math.abs(thumb[j] - prev[j]);
+    if (prev && Math.abs(thumb[j] - prev[j]) > CELL_DELTA) sum++;
   }
-  return { thumb, diff: prev ? sum / thumb.length : Infinity };
+  return { thumb, diff: prev ? sum : Infinity };
 }
 
 /**
