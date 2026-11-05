@@ -1,0 +1,9 @@
+node_modules/
+web/dist/
+web/public/imdb.sqlite.enc
+*.sqlite
+*.sqlite.enc
+.imdb_cache/
+__pycache__/
+.venv/
+.DS_Store
