@@ -109,7 +109,62 @@ async function startCamera() {
   video.srcObject = S.stream;
   await video.play();
   await new Promise((r) => (video.videoWidth ? r() : video.addEventListener('loadedmetadata', r, { once: true })));
+  const caps = S.stream.getVideoTracks()[0]?.getCapabilities?.();
+  Z.hw = caps?.zoom && caps.zoom.max > 1 ? caps.zoom : null; // camera-native zoom (if the browser exposes it)
+  await applyZoom(Z.level);
 }
+
+// =============== zoom ===============
+// Camera-native zoom when the track supports it; otherwise digital: the <video> is scaled around its centre
+// and grabFrame() crops the same centre region at native resolution (so OCR gets more pixels per letter).
+const Z = { level: settings.get().zoom || 1, hw: null, pending: null };
+const maxZoom = () => (Z.hw ? Math.min(Z.hw.max, 10) : 5);
+const digitalZoom = () => (Z.hw ? 1 : Z.level);
+
+async function applyZoom(level) {
+  Z.level = Math.round(Math.min(Math.max(1, level), maxZoom()) * 10) / 10;
+  if (Z.hw && S.stream) {
+    try {
+      await S.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ zoom: Math.min(Math.max(Z.level, Z.hw.min), Z.hw.max) }] });
+    } catch { /* ignore: keep previous zoom */ }
+  }
+  video.style.transform = digitalZoom() > 1 ? `scale(${digitalZoom()})` : '';
+  $('#zoom').textContent = `${Number.isInteger(Z.level) ? Z.level : Z.level.toFixed(1)}×`;
+  S.prevThumb = null; // new view → OCR the next frame even if the thumbnail looks similar
+  settings.set({ zoom: Z.level });
+}
+
+/** Coalesce pinch updates to one per animation frame. */
+function scheduleZoom(level) {
+  const first = Z.pending == null;
+  Z.pending = level;
+  if (first) requestAnimationFrame(() => { const l = Z.pending; Z.pending = null; applyZoom(l); });
+}
+
+const vf = $('#viewfinder');
+let pinch = null;
+let lastPinchEnd = 0;
+const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+vf.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2 && S.mode === 'scanning') { pinch = { d0: dist(e.touches), z0: Z.level }; e.preventDefault(); }
+}, { passive: false });
+vf.addEventListener('touchmove', (e) => {
+  if (!pinch || e.touches.length !== 2) return;
+  e.preventDefault();
+  scheduleZoom(pinch.z0 * (dist(e.touches) / pinch.d0));
+}, { passive: false });
+vf.addEventListener('touchend', (e) => {
+  if (pinch && e.touches.length < 2) { pinch = null; lastPinchEnd = performance.now(); }
+});
+// iOS Safari page-zoom gesture events: keep them from zooming the whole page
+for (const ev of ['gesturestart', 'gesturechange']) vf.addEventListener(ev, (e) => e.preventDefault());
+
+$('#zoom').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const steps = [1, 2, 3].filter((z) => z <= maxZoom());
+  const next = steps.find((z) => z > Z.level + 0.05) ?? 1;
+  applyZoom(next);
+});
 
 function stopCamera() {
   S.stream?.getTracks().forEach((t) => t.stop());
@@ -189,7 +244,7 @@ async function loop(id) {
 
 /** Grab → (skip if unchanged) → preprocess → OCR → match → badges/history. */
 async function scanFrame({ snapshot, id }) {
-  if (!grabFrame(video, raw)) return;
+  if (!grabFrame(video, raw, digitalZoom())) return;
   const { thumb, diff } = thumbDiff(raw, S.prevThumb);
   if (!snapshot && diff < DIFF_THRESHOLD) {
     // Nothing changed: no OCR, but the previous frame's titles count as seen again (voting on static screens).
@@ -268,17 +323,16 @@ function recordHistory(m) {
   return row.id;
 }
 
-// =============== snapshot ===============
+// =============== shutter ===============
+// Not live yet → start the visible live preview (aim + zoom first).
+// Live → freeze exactly what is on screen and OCR it once (no voting needed).
 $('#shutter').addEventListener('click', async (e) => {
   e.stopPropagation();
+  if (S.mode !== 'scanning') { startScanning(); return; }
   S.loopId++; // stop live loop
-  status('Snapshot…');
+  status('Scanning frame…');
   try {
-    const wasRunning = !!S.stream;
-    await startCamera();
-    if (!wasRunning) await sleep(500); // let exposure settle
     await ensureOcr();
-    setMode('scanning'); // so pause() freezes properly
     await scanFrame({ snapshot: true });
     pause();
     status(S.badges.length ? '' : 'No titles recognised');
@@ -292,6 +346,7 @@ $('#shutter').addEventListener('click', async (e) => {
 // =============== viewfinder interaction ===============
 $('#viewfinder').addEventListener('click', (e) => {
   if (e.target.closest('button')) return;
+  if (performance.now() - lastPinchEnd < 400) return; // end of a pinch, not a tap
   const hit = overlay.hit(e.clientX, e.clientY);
   if (hit) { pause(); openMatch(hit); return; }
   if (S.mode !== 'scanning') startScanning();

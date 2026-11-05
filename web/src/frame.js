@@ -6,12 +6,16 @@ export const DIFF_THRESHOLD = 6; // mean abs grey difference (0–255) below whi
 const thumbCanvas = new OffscreenCanvas(THUMB, THUMB);
 const thumbCtx = thumbCanvas.getContext('2d', { willReadFrequently: true });
 
-/** Copy the current video frame at full resolution (kept for the frozen view). */
-export function grabFrame(video, into) {
-  const w = video.videoWidth, h = video.videoHeight;
-  if (!w || !h) return null;
+/**
+ * Copy the current video frame (kept for the frozen view). With digital zoom z > 1 only the centre
+ * 1/z of the frame is copied, at native resolution — exactly the region visible in the zoomed viewfinder.
+ */
+export function grabFrame(video, into, z = 1) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return null;
+  const w = Math.round(vw / z), h = Math.round(vh / z);
   if (into.width !== w || into.height !== h) { into.width = w; into.height = h; }
-  into.getContext('2d').drawImage(video, 0, 0, w, h);
+  into.getContext('2d').drawImage(video, (vw - w) / 2, (vh - h) / 2, w, h, 0, 0, w, h);
   return into;
 }
 

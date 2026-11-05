@@ -51,12 +51,12 @@ progress { width: 100%; accent-color: var(--accent); }
 /* viewfinder */
 .viewfinder {
   position: relative; flex: none; height: 38vh; background: #050505; overflow: hidden;
-  transition: height .25s ease; touch-action: manipulation;
+  transition: height .25s ease; touch-action: none; /* pinch = camera zoom, not page zoom */
 }
 body[data-state=scanning] .viewfinder { height: 66vh; }
 body[data-state=paused] .viewfinder { height: 30vh; }
 .viewfinder video, .viewfinder canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.viewfinder video { opacity: 0; }
+.viewfinder video { opacity: 0; transform-origin: 50% 50%; transition: transform .08s linear; }
 body[data-state=scanning] .viewfinder video { opacity: 1; }
 .vf-hint {
   position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none;
@@ -152,3 +152,9 @@ input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent); }
   z-index: 20; box-shadow: 0 4px 20px rgba(0,0,0,.5); font-size: .9rem; max-width: 92vw;
 }
 .toast button { padding: .25rem .6rem; color: var(--accent); background: none; border: 0; font-weight: 600; }
+
+.vf-zoom {
+  position: absolute; left: .6rem; bottom: .9rem; min-width: 46px; height: 36px; padding: 0 .6rem; border-radius: 18px;
+  background: rgba(0,0,0,.6); border-color: #555; color: var(--accent); font-weight: 700; font-size: .9rem; display: none;
+}
+body[data-state=scanning] .vf-zoom { display: block; }

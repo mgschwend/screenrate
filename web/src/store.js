@@ -14,7 +14,7 @@ const read = (k, fallback) => {
 const write = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
 export const settings = {
-  defaults: { tmdbKey: '', fps: 3, preprocess: true, minConfidence: 0.6 },
+  defaults: { tmdbKey: '', fps: 3, preprocess: true, minConfidence: 0.6, zoom: 1 },
   get() { return { ...this.defaults, ...read(K.settings, {}) }; },
   set(patch) { write(K.settings, { ...this.get(), ...patch }); },
 };
