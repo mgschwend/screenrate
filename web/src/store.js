@@ -2,26 +2,23 @@
 const K = {
   history: 'screenrate.history',
   watchlist: 'screenrate.watchlist',
-  remembered: 'screenrate.remembered',
   settings: 'screenrate.settings',
   posters: 'screenrate.posters',
 };
-const HISTORY_MAX = 500;
+const HISTORY_MAX = 100;
 
 const read = (k, fallback) => {
   try { return JSON.parse(localStorage.getItem(k)) ?? fallback; } catch { return fallback; }
 };
 const write = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
-const SETTINGS_SCHEMA = 2;
+const SETTINGS_SCHEMA = 3;
 export const settings = {
-  // preprocess off: on real TV footage invert+threshold destroyed most text (16 → 7 lines, mostly garbage)
-  defaults: { tmdbKey: '', fps: 3, preprocess: false, minConfidence: 0.5, zoom: 1, showBoxes: true, schema: SETTINGS_SCHEMA },
+  defaults: { tmdbKey: '', schema: SETTINGS_SCHEMA },
   get() {
     const stored = read(K.settings, {});
-    if (stored.schema !== SETTINGS_SCHEMA) { // migrate: older builds saved preprocess=true / minConfidence=0.6
-      const { tmdbKey = '', fps = 3, zoom = 1 } = stored;
-      const migrated = { ...this.defaults, tmdbKey, fps, zoom };
+    if (stored.schema !== SETTINGS_SCHEMA) { // migrate: keep only what still exists
+      const migrated = { ...this.defaults, tmdbKey: stored.tmdbKey || '' };
       write(K.settings, migrated);
       return migrated;
     }
@@ -30,27 +27,17 @@ export const settings = {
   set(patch) { write(K.settings, { ...this.get(), ...patch }); },
 };
 
-export const remembered = {
-  all() { return read(K.remembered, {}); },
-  set(norm, tconst) { write(K.remembered, { ...this.all(), [norm]: tconst }); },
-  clear() { localStorage.removeItem(K.remembered); },
-};
-
-/** History rows: {id, norm, tconst|null, title, year, rating, at}. Append-only; rows update in place. */
+/** Recently opened titles: {tconst, title, year, type, rating, at}. Deduped, newest last. */
 export const history = {
-  all() { return read(K.history, []); },
-  add(row) {
-    const rows = this.all();
-    rows.push({ id: crypto.randomUUID(), at: Date.now(), ...row });
-    write(K.history, rows.slice(-HISTORY_MAX));
-    return rows[rows.length - 1];
+  all() { // newest last; dedupe (older app versions stored repeats)
+    const rows = read(K.history, []).filter((r) => r.tconst);
+    const seen = new Set();
+    return rows.reverse().filter((r) => !seen.has(r.tconst) && seen.add(r.tconst)).reverse();
   },
-  update(id, patch) {
-    const rows = this.all();
-    const r = rows.find((x) => x.id === id);
-    if (r) Object.assign(r, patch);
-    write(K.history, rows);
-    return r;
+  add(t) {
+    const rows = this.all().filter((r) => r.tconst !== t.tconst);
+    rows.push({ tconst: t.tconst, title: t.title, year: t.year, type: t.type, rating: t.rating, at: Date.now() });
+    write(K.history, rows.slice(-HISTORY_MAX));
   },
   clear() { localStorage.removeItem(K.history); },
 };

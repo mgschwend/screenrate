@@ -1,8 +1,11 @@
 # ScreenRate
 
-Private PWA: point the phone camera at the TV (Netflix, Disney+, …), recognise the
-movie/series titles on screen and overlay their IMDb rating on the camera image.
-History list and watchlist. Fully on-device: no server, no accounts.
+Private PWA: type a film or series title and see IMDb ratings live as you type, with
+an IMDb link per result. The detail page proposes similar titles, and there is a watchlist.
+Fully on-device: no server, no accounts.
+
+> **Pivot (2026-11-05).** The camera/OCR scanner was removed. On real Netflix screens the titles are
+> logo artwork that on-device OCR can't read, and scanning felt awkward. Search replaces it.
 Deployed to GitHub Pages: https://mgschwend.github.io/screenrate/
 
 ## Architecture
@@ -15,46 +18,29 @@ Deployed to GitHub Pages: https://mgschwend.github.io/screenrate/
 - **Encryption.** IMDb data is licensed for *individual personal use*, so the
   published file is encrypted. `scripts/encrypt_db.py` gzips the file, then encrypts it with AES-256-GCM. The key is derived with PBKDF2-SHA256 from the `DB_PASSPHRASE` repo secret, at 600k iterations with a fixed salt. The output is `imdb.sqlite.enc`, about 10 MB. The app asks for the passphrase once, decrypts with WebCrypto (`web/src/dbcrypto.js`) and keeps only a non-extractable key on the device. The repo, the Pages site and the CI artifacts only ever hold ciphertext.
 - **Loading.** The app loads the database with the official SQLite WASM build (`@sqlite.org/sqlite-wasm`), deserialized in memory, and caches the encrypted file in Cache Storage. The "Update data" button drops the cache entry and fetches the file again. sql.js was the original plan, but its standard build has no FTS5, which `titles_fts` needs.
-- **OCR.** PaddleOCR runs through `ppu-paddle-ocr` and `onnxruntime-web` in a Web Worker. It uses WebGPU and falls back to WASM. It returns text lines with bounding boxes.
-- **Matching.** OCR text goes through `normalize()`, which is identical in Python and JS. Parity is tested in `web/test/normalize.test.js`. Lookup order:
-  1. Exact `normTitle`, `normOriginal` or `akas.normTitle` match.
-  2. Otherwise, an FTS prefix match on all words, keeping only results with bigram Dice similarity ≥ 0.75.
+- **Search.** `web/src/search.js` ranks results in four groups:
+  1. Exact title, original title or DE/CH/AT alias.
+  2. Title or alias starts with the query.
+  3. Every word matches as a prefix (FTS5).
+  4. Typo fallback (looser prefixes plus Dice ≥ 0.6), used only when nothing else matched.
 
-  Candidates are ranked by votes, highest first.
-- **Frame pipeline.** The app scans at about 2–4 fps:
-  - Each frame is downscaled to 960 px, converted to grayscale, inverted and thresholded.
-  - A frame is skipped when its 32×32 thumbnail barely differs from the previous one.
-  - A title must appear in at least 2 frames before it is shown.
-  - A stop-list drops UI chrome.
-- **Disambiguation.** The app tries these in order:
-  1. Pick a clear winner when it has at least 5× the votes of the runner-up.
-  2. Use a year or "Season/Staffel" read near the title.
-  3. Show a "?" badge that opens a picker.
-
-  Choices the user makes are remembered in `localStorage` (normTitle → tconst).
-- **Posters (optional).** Fetched from TMDB `/find/{tconst}` when the user supplies an API key in settings.
-- **Offline.** `web/sw-template.js` becomes `sw.js` at build time. The service worker precaches the app shell and runtime-caches the OCR models (Hugging Face), the onnxruntime wasm (jsDelivr) and TMDB posters.
-- **Debugging.** The text field runs the same matching pipeline as the camera. In the console, `screenrate.snapshotFrom(canvas)` runs OCR on any image.
-- **UI change (2026-11-05):** the AR rating badges on the camera image were replaced by an **"On screen now" list** under the viewfinder, because badges on a hand-held live image weren't smooth. The list keeps first-seen order and drops a title about 2 s after it leaves the frame. The camera image only shows thin outlines around the text OCR reads.
-- **UI.** The app has two states:
-  - **Scanning:** live AR badges on the camera image, with the history list below.
-  - **Paused:** the last frame is frozen with its badges still tappable.
-
-  It also has a detail sheet, a snapshot mode, a watchlist and settings.
+  Within each group, more IMDb votes ranks higher. Queries take about 10 ms.
+- **Similar titles.** `scripts/add_similar.py` runs in CI and adds `titles.genres` plus a `similar` table with the top 10 titles per film. The score combines shared directors (weight 3), writers (2) and lead cast (1–1.5), genre overlap and a small popularity prior. If a title has no list, the app falls back to the most-voted titles of the same genre. With a TMDB key, TMDB recommendations appear on top, each mapped back to a local IMDb rating.
+- **Posters (optional).** Fetched from TMDB `/find/{tconst}` when you supply your own key in Settings.
+- **Offline.** The service worker precaches the app shell; posters are runtime-cached.
 
 ## Layout
 
 ```
 scripts/build_imdb_db.py   IMDb TSV → imdb.sqlite
 scripts/encrypt_db.py      imdb.sqlite → imdb.sqlite.enc (and --decrypt)
-web/src/main.js            app state machine (idle/scanning/paused), camera loop, snapshot
-web/src/match.js           stop-list, Dice, resolve/disambiguation, context, phrases, voting
-web/src/titledb.js         SQL queries (exact / FTS5 prefix)
+scripts/add_similar.py     genres + similar titles (IMDb principals)
+web/src/main.js            boot/unlock, live search, detail, settings
+web/src/search.js          ranked search-as-you-type
+web/src/match.js           normalize helpers, Dice, title resolution (used by search fallback)
+web/src/titledb.js         SQL queries (exact / FTS5 prefix / aliases / similar)
 web/src/dataload.js        cache → decrypt → sqlite; key storage
-web/src/frame.js           frame diff + TV preprocessing
-web/src/ocr*.js            PaddleOCR worker + client
-web/src/overlay.js         AR badges on canvas
-web/src/ui.js, store.js, tmdb.js  sheet/lists, localStorage, posters
+web/src/ui.js, store.js, tmdb.js  rows/sheet, localStorage, TMDB posters + recommendations
 web/                       Vite + vanilla JS PWA
 .github/workflows/pages.yml  build data + web, deploy to Pages
                              (on push to main, weekly on Mondays, or manually)
@@ -69,8 +55,9 @@ gh secret set DB_PASSPHRASE -R mgschwend/screenrate   # prompts; choose a long p
 Local build:
 
 ```bash
-pip install pandas cryptography
+pip install pandas numpy cryptography
 python scripts/build_imdb_db.py --akas
+python scripts/add_similar.py imdb.sqlite
 DB_PASSPHRASE=… python scripts/encrypt_db.py imdb.sqlite web/public/imdb.sqlite.enc
 cd web && npm install && npm run dev
 ```

@@ -21,7 +21,8 @@ export class TitleDb {
     let words = norm.split(' ').filter(Boolean);
     if (!words.length) return [];
     // loose: tolerate OCR errors at word ends ("inceptior" → "incep*", "breaklng" → "break*")
-    if (loose) words = words.map((w) => (w.length > 4 ? w.slice(0, Math.max(3, Math.ceil(w.length * 0.6))) : w));
+    if (loose === 'short') words = words.map((w) => w.slice(0, 2));
+    else if (loose) words = words.map((w) => (w.length > 4 ? w.slice(0, Math.max(3, Math.ceil(w.length * 0.6))) : w));
     const q = words.map((w) => `"${w}"*`).join(' ');
     try {
       return this.db.selectObjects(
@@ -32,9 +33,57 @@ export class TitleDb {
     }
   }
 
+  /** Titles whose DE/CH/AT alias starts with `norm` (index range scan on akas.normTitle). */
+  akaPrefix(norm, limit = 30) {
+    if (!norm) return [];
+    return this.db.selectObjects(
+      `SELECT ${COLS}, a.title AS akaTitle FROM akas a JOIN titles t ON t.tconst = a.tconst
+       WHERE a.normTitle >= ?1 AND a.normTitle < ?1 || '{' ORDER BY t.votes DESC LIMIT ?2`, [norm, limit]).map(plain);
+  }
+
+  /** Titles whose DE/CH/AT alias contains the phrase anywhere ("herr der ringe" → "der herr der ringe ..."). */
+  akaContains(norm, limit = 30) {
+    if (norm.length < 3) return [];
+    return this.db.selectObjects(
+      `SELECT ${COLS}, a.title AS akaTitle FROM akas a JOIN titles t ON t.tconst = a.tconst
+       WHERE a.normTitle LIKE '%' || ?1 || '%' ORDER BY t.votes DESC LIMIT ?2`, [norm, limit]).map(plain);
+  }
+
   get(tconst) {
     const r = this.db.selectObject(`SELECT ${COLS} FROM titles t WHERE t.tconst = ?`, [tconst]);
-    return r ? plain(r) : null;
+    if (!r) return null;
+    const out = plain(r);
+    try { out.genres = this.db.selectValue('SELECT genres FROM titles WHERE tconst = ?', [tconst]) || ''; } catch { /* old DB */ }
+    return out;
+  }
+
+  /** Precomputed similar titles (scripts/add_similar.py), best first. [] if the DB predates that step. */
+  similar(tconst, limit = 10) {
+    let ids = [];
+    try {
+      const row = this.db.selectValue('SELECT others FROM similar WHERE id = ?', [Number(tconst.slice(2))]);
+      if (row) ids = row.split(',').slice(0, limit).map((n) => `tt${n.padStart(7, '0')}`);
+    } catch { return []; }
+    if (!ids.length) return [];
+    const rows = this.db.selectObjects(`SELECT ${COLS} FROM titles t WHERE t.tconst IN (${ids.map(() => '?').join(',')})`, ids).map(plain);
+    const byId = new Map(rows.map((r) => [r.tconst, r]));
+    return ids.map((i) => byId.get(i)).filter(Boolean);
+  }
+
+  /** Fallback when no precomputed list: most-voted titles sharing the first genre and type. */
+  sameGenre(tconst, limit = 10) {
+    try {
+      const g = this.db.selectValue('SELECT genres FROM titles WHERE tconst = ?', [tconst]);
+      const first = (g || '').split(',')[0];
+      if (!first) return [];
+      return this.db.selectObjects(
+        `SELECT ${COLS} FROM titles t WHERE t.tconst != ?1 AND (',' || t.genres || ',') LIKE '%,' || ?2 || ',%'
+           AND t.type = (SELECT type FROM titles WHERE tconst = ?1) ORDER BY t.votes DESC LIMIT ?3`, [tconst, first, limit]).map(plain);
+    } catch { return []; }
+  }
+
+  hasSimilar() {
+    try { return !!this.db.selectValue("SELECT 1 FROM sqlite_master WHERE name = 'similar'"); } catch { return false; }
   }
 
   meta() {

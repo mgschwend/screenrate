@@ -10,8 +10,7 @@ function serviceWorker() {
     generateBundle(_, bundle) {
       const assets = Object.keys(bundle).filter((f) => !f.endsWith('.map'));
       const publicFiles = ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
-      const list = [...assets, ...publicFiles].filter((f) => f !== 'imdb.sqlite.enc' && !/ort-wasm|sqlite3-(worker1|opfs)/.test(f));
-      // ort-wasm (~30 MB) is cached on first OCR use instead of at install time
+      const list = [...assets, ...publicFiles].filter((f) => f !== 'imdb.sqlite.enc' && !/sqlite3-(worker1|opfs)/.test(f));
       const version = createHash('sha256').update(list.sort().join('|')).digest('hex').slice(0, 12);
       const src = readFileSync(new URL('./sw-template.js', import.meta.url), 'utf8')
         .replace('__VERSION__', version)
@@ -24,7 +23,6 @@ function serviceWorker() {
 export default defineConfig({
   base: './', // served from https://mgschwend.github.io/screenrate/
   build: { target: 'es2022', outDir: 'dist', emptyOutDir: true, chunkSizeWarningLimit: 4000 },
-  worker: { format: 'es' },
-  optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm', 'onnxruntime-web', 'ppu-paddle-ocr'] },
+  optimizeDeps: { exclude: ['@sqlite.org/sqlite-wasm'] },
   plugins: [serviceWorker()],
 });

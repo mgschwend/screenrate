@@ -1,39 +1,11 @@
 import './style.css';
 import { openDatabase, forgetKey } from './dataload.js';
-import { resolve, contextFor, phrases, Voter } from './match.js';
-import { normalize } from './normalize.js';
-import { grabFrame, thumbDiff, prepare, DIFF_THRESHOLD } from './frame.js';
-import { initOcr, recognize, ocrState } from './ocr.js';
-import { Overlay } from './overlay.js';
-import { history, watchlist, remembered, settings, posterCache } from './store.js';
-import {
-  $, toast, renderHistory, appendHistory, refreshHistoryRow, renderWatchlist, openSheet, closeSheet, fmtRating, renderOnScreen,
-} from './ui.js';
+import { searchTitles, MIN_CHARS } from './search.js';
+import { history, settings, posterCache } from './store.js';
+import { recommendationsFor } from './tmdb.js';
+import { $, toast, renderRows, renderWatchlist, openSheet, closeSheet } from './ui.js';
 
 let tdb = null;
-const video = $('#video');
-const overlay = new Overlay($('#overlay'));
-const raw = document.createElement('canvas'); // last full-res frame (frozen view)
-
-/** state: 'idle' (no camera yet) | 'scanning' | 'paused' */
-const S = {
-  mode: 'idle',
-  stream: null,
-  loopId: 0,
-  frameNo: 0,
-  prevThumb: null,
-  voter: new Voter(2, 8),
-  badges: [],              // [{box, label, ambiguous, data}] in raw-frame px (current confirmed matches)
-  onScreen: new Map(),     // voteKey → {data, firstSeen, lastSeen}: the "On screen now" list
-  frameSize: [0, 0],
-  lookups: new Map(),      // cache key → resolve() result
-  sessionSeen: new Map(),  // dedupe key → history row id (this app run)
-  floorSince: 0,
-  lastMatches: [],         // matches of the last OCR'd frame (re-used while the picture is unchanged)
-};
-
-const setMode = (m) => { S.mode = m; document.body.dataset.state = m; };
-const status = (t) => { $('#vf-status').textContent = t || ''; };
 
 // =============== boot / unlock ===============
 async function boot() {
@@ -82,504 +54,101 @@ $('#unlock-form').addEventListener('submit', async (e) => {
 function startApp() {
   $('#boot').hidden = true;
   $('#app').hidden = false;
-  setMode('idle');
-  renderHistory(openHistoryRow);
-  renderWatchlist(openTconst);
+  showResults();
   renderSettings();
-  overlay.clear();
+  // DB cached by an older app version (before similar titles)? Refresh it once in the background.
+  if (!tdb.hasSimilar()) refreshData({ quiet: true });
 }
 
 // =============== tabs ===============
-for (const b of document.querySelectorAll('.tabs button')) {
-  b.addEventListener('click', () => {
-    if (b.dataset.view !== 'scan') pause();
-    for (const x of document.querySelectorAll('.tabs button')) x.classList.toggle('active', x === b);
-    for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== `view-${b.dataset.view}`;
-    if (b.dataset.view === 'watchlist') renderWatchlist(openTconst);
-    if (b.dataset.view === 'settings') renderSettings();
-  });
+function showView(name) {
+  for (const x of document.querySelectorAll('.tabs button')) x.classList.toggle('active', x.dataset.view === name);
+  for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== `view-${name}`;
+  if (name === 'watchlist') renderWatchlist(openTitle);
+  if (name === 'settings') renderSettings();
 }
+for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => showView(b.dataset.view));
 
-// =============== camera ===============
-async function startCamera() {
-  if (S.stream) return;
-  S.stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } }, // 4K where available: digital zoom keeps detail
-  });
-  video.srcObject = S.stream;
-  await video.play();
-  await new Promise((r) => (video.videoWidth ? r() : video.addEventListener('loadedmetadata', r, { once: true })));
-  const caps = S.stream.getVideoTracks()[0]?.getCapabilities?.();
-  Z.hw = caps?.zoom && caps.zoom.max > 1 ? caps.zoom : null; // camera-native zoom (if the browser exposes it)
-  await applyZoom(Z.level);
-}
+// =============== search ===============
+const q = $('#q');
+let searchTimer;
+q.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(showResults, 60); });
+$('#search-form').addEventListener('submit', (e) => { e.preventDefault(); q.blur(); showResults(); });
 
-// =============== live view ===============
-/** Centre crop of the current video frame for the digital zoom level (same region grabFrame() OCRs). */
-function liveFrame() {
-  const vw = video.videoWidth, vh = video.videoHeight, z = digitalZoom();
-  const sw = Math.round(vw / z), sh = Math.round(vh / z);
-  return { source: video, sx: (vw - sw) / 2, sy: (vh - sh) / 2, sw, sh };
-}
-
-/** Paint camera + badges on the canvas every animation frame while scanning. */
-function paintLive() {
-  if (S.mode !== 'scanning') return;
-  if (video.videoWidth) {
-    const f = liveFrame();
-    // badges/boxes refer to the last OCR'd crop; if zoom changed since, hide them until the next OCR
-    const same = S.frameSize[0] === f.sw && S.frameSize[1] === f.sh;
-    if (!same) overlay.debug = null;
-    overlay.render([], f.sw, f.sh, f);
-  }
-  requestAnimationFrame(paintLive);
-}
-
-// =============== zoom ===============
-// Camera-native zoom when the track supports it; otherwise digital: the <video> is scaled around its centre
-// and grabFrame() crops the same centre region at native resolution (so OCR gets more pixels per letter).
-const Z = { level: settings.get().zoom || 1, hw: null, pending: null };
-const maxZoom = () => (Z.hw ? Math.min(Z.hw.max, 10) : 4);
-const digitalZoom = () => (Z.hw ? 1 : Z.level);
-
-async function applyZoom(level) {
-  Z.level = Math.round(Math.min(Math.max(1, level), maxZoom()) * 10) / 10;
-  if (Z.hw && S.stream) {
-    try {
-      await S.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ zoom: Math.min(Math.max(Z.level, Z.hw.min), Z.hw.max) }] });
-    } catch { /* ignore: keep previous zoom */ }
-  }
-  $('#zoom').textContent = `${Number.isInteger(Z.level) ? Z.level : Z.level.toFixed(1)}×`;
-  S.prevThumb = null; // new view → OCR the next frame even if the thumbnail looks similar
-  settings.set({ zoom: Z.level });
-}
-
-/** Coalesce pinch updates to one per animation frame. */
-function scheduleZoom(level) {
-  const first = Z.pending == null;
-  Z.pending = level;
-  if (first) requestAnimationFrame(() => { const l = Z.pending; Z.pending = null; applyZoom(l); });
-}
-
-const vf = $('#viewfinder');
-let pinch = null;
-let lastPinchEnd = 0;
-const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-vf.addEventListener('touchstart', (e) => {
-  if (e.touches.length === 2 && S.mode === 'scanning') { pinch = { d0: dist(e.touches), z0: Z.level }; e.preventDefault(); }
-}, { passive: false });
-vf.addEventListener('touchmove', (e) => {
-  if (!pinch || e.touches.length !== 2) return;
-  e.preventDefault();
-  scheduleZoom(pinch.z0 * (dist(e.touches) / pinch.d0));
-}, { passive: false });
-vf.addEventListener('touchend', (e) => {
-  if (pinch && e.touches.length < 2) { pinch = null; lastPinchEnd = performance.now(); }
-});
-// iOS Safari page-zoom gesture events: keep them from zooming the whole page
-for (const ev of ['gesturestart', 'gesturechange']) vf.addEventListener(ev, (e) => e.preventDefault());
-
-$('#zoom').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const steps = [1, 2, 3].filter((z) => z <= maxZoom());
-  const next = steps.find((z) => z > Z.level + 0.05) ?? 1;
-  applyZoom(next);
-});
-
-function stopCamera() {
-  S.stream?.getTracks().forEach((t) => t.stop());
-  S.stream = null;
-  video.srcObject = null;
-}
-
-let orientationAsked = false;
-async function askOrientationPermission() {
-  if (orientationAsked) return;
-  orientationAsked = true;
-  try {
-    if (typeof DeviceOrientationEvent?.requestPermission === 'function') await DeviceOrientationEvent.requestPermission();
-  } catch { /* denied → floor-pause just won't trigger */ }
-}
-
-// =============== state machine ===============
-async function startScanning() {
-  if (S.mode === 'scanning') return;
-  askOrientationPermission();
-  status('Starting camera…');
-  try {
-    await startCamera();
-  } catch (err) {
-    status('');
-    toast(`Camera unavailable: ${err.message}`);
+function showResults() {
+  const text = q.value.trim();
+  const list = $('#results'), empty = $('#results-empty');
+  if (text.replace(/\s/g, '').length < MIN_CHARS) {
+    const recent = history.all().reverse();
+    $('#list-head').textContent = 'Recently opened';
+    $('#list-head').hidden = recent.length === 0;
+    renderRows(list, recent, openTitle);
+    empty.hidden = recent.length > 0;
+    empty.textContent = 'Type a film or series title — results appear as you type.';
     return;
   }
-  setMode('scanning');
-  overlay.clear();
-  S.badges = [];
-  S.prevThumb = null;
-  S.lastMatches = [];
-  S.onScreen.clear();
-  renderOnScreen([], () => {});
-  S.ocrItems = null;
-  overlay.debug = null;
-  S.voter.reset();
-  S.floorSince = 0;
-  requestAnimationFrame(paintLive);
-  ensureOcr().then(() => loop(++S.loopId));
+  const rows = searchTitles(tdb, text);
+  $('#list-head').hidden = false;
+  $('#list-head').textContent = rows.length ? `${rows.length}${rows.length === 30 ? '+' : ''} results` : 'No results';
+  renderRows(list, rows, openTitle);
+  list.scrollTop = 0;
+  empty.hidden = rows.length > 0;
+  empty.textContent = `Nothing found for “${text}”.`;
 }
 
-/** → Paused: freeze the last frame WITH its badges. */
-function pause() {
-  if (S.mode !== 'scanning') return;
-  S.loopId++;
-  setMode('paused');
-  stopCamera();
-  showStats();
-  requestAnimationFrame(() => overlay.render([], ...S.frameSize, raw.width ? raw : null));
-}
-
-let ocrReady = null;
-function ensureOcr() {
-  if (!ocrReady) {
-    status('Loading OCR models…');
-    ocrReady = initOcr().then(() => status(''), (err) => {
-      ocrReady = null;
-      status('');
-      toast(`OCR failed to load: ${err.message}`);
-      throw err;
-    });
-  }
-  return ocrReady;
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function loop(id) {
-  while (S.mode === 'scanning' && id === S.loopId) {
-    const t0 = performance.now();
-    try {
-      await scanFrame({ snapshot: false, id });
-    } catch (err) {
-      status(`OCR error: ${err.message}`);
-      await sleep(1000);
-    }
-    await sleep(Math.max(0, 1000 / settings.get().fps - (performance.now() - t0)));
-  }
-}
-
-/** Grab → (skip if unchanged) → preprocess → OCR → match → badges/history. */
-async function scanFrame({ snapshot, id }) {
-  if (!grabFrame(video, raw, digitalZoom())) return;
-  const { thumb, diff } = thumbDiff(raw, S.prevThumb);
-  const stale = performance.now() - (S.lastOcrAt || 0) > 2000; // re-read at least every 2 s anyway
-  if (!snapshot && diff < DIFF_THRESHOLD && !stale) {
-    // Nothing changed: no OCR, but the previous frame's titles count as seen again (voting on static screens).
-    if (S.lastMatches.length) { S.frameNo++; showMatches(S.lastMatches, { snapshot: false }); }
-    return;
-  }
-  S.prevThumb = thumb;
-  S.lastOcrAt = performance.now();
-  await ocrRaw({ snapshot, id });
-}
-
-/** OCR whatever is in `raw` and update badges/history. */
-async function ocrRaw({ snapshot, id }) {
-  const { preprocess, minConfidence } = settings.get();
-  const { canvas, scale } = prepare(raw, { preprocess });
-  $('#vf-status').classList.add('busy');
-  let items;
-  try { items = await recognize(canvas); } finally { $('#vf-status').classList.remove('busy'); }
-  if (!snapshot && (S.mode !== 'scanning' || id !== S.loopId)) return; // paused meanwhile
-  const scaled = items
-    .filter((it) => it.confidence >= minConfidence && it.text.trim())
-    .map((it) => ({ ...it, box: { x: it.box.x * scale, y: it.box.y * scale, width: it.box.width * scale, height: it.box.height * scale } }));
-  S.frameNo++;
-  S.ocrItems = scaled;
-  S.ocrRawCount = items.length;
-  overlay.debug = settings.get().showBoxes ? { items: scaled, matched: new Set() } : null;
-  processOcr(scaled, { snapshot });
-  showStats();
-}
-
-const JUNK_RAW = /[★☆✩✭✮]|^\s*[—–-]\s|^\s*[“"„«]/; // review quotes ("★★★★★ — the Guardian"), dashes, quotes
-function lookup(text, context, confidence = 1) {
-  if (JUNK_RAW.test(text)) return null;
-  if (confidence < 0.85 && normalize(text).replace(/ /g, '').length <= 4) return null; // short + unsure = noise
-  const key = `${normalize(text)}|${context.year || ''}|${context.series ? 's' : ''}`;
-  if (!S.lookups.has(key)) S.lookups.set(key, resolve(tdb, text, { context, remembered: remembered.all() }));
-  return S.lookups.get(key);
-}
-
-function processOcr(items, { snapshot }) {
-  const matches = [];
-  for (const ph of phrases(items)) {
-    let res = lookup(ph.text, contextFor(ph, items), ph.confidence);
-    if (res) { matches.push({ res, box: ph.box, text: ph.text, parts: ph.parts }); continue; }
-    if (ph.parts.length > 1) {
-      for (const part of ph.parts) {
-        res = lookup(part.text, contextFor(part, items), part.confidence);
-        if (res) matches.push({ res, box: part.box, text: part.text, parts: [part] });
-      }
-    }
-  }
-  if (overlay.debug) for (const m of matches) for (const p of m.parts) overlay.debug.matched.add(p);
-  S.lastMatches = matches;
-  showMatches(matches, { snapshot });
-}
-
-function showMatches(matches, { snapshot }) {
-  // Vote on the matched title, not the raw OCR string: noisy OCR ("BreakIng Bad", "Breaking Ba") still agrees.
-  if (!snapshot) S.voter.observe(S.frameNo, matches.map(voteKey));
-  const shown = snapshot ? matches : matches.filter((m) => S.voter.confirmed(voteKey(m)));
-  S.shownCount = shown.length;
-
-  S.badges = shown.map((m) => {
-    const rowId = recordHistory(m);
-    return { box: m.box, ...badgeLabel(m.res), data: { res: m.res, text: m.text, rowId } };
-  });
-  S.frameSize = [raw.width, raw.height];
-  updateOnScreen({ snapshot });
-  if (S.mode === 'paused' || snapshot) overlay.render([], raw.width, raw.height, raw);
-}
-
-const ONSCREEN_TTL = 6; // frames (~2 s at 3 fps) a title stays listed after it was last seen
-
-/** Keep a stable list: new titles append at the bottom, rows never reorder, stale ones drop out. */
-function updateOnScreen({ snapshot }) {
-  if (snapshot) S.onScreen.clear();
-  for (const b of S.badges) {
-    const k = voteKey(b.data);
-    const e = S.onScreen.get(k);
-    if (e) { e.lastSeen = S.frameNo; e.data = b.data; } else S.onScreen.set(k, { data: b.data, firstSeen: S.frameNo, lastSeen: S.frameNo });
-  }
-  if (!snapshot) for (const [k, e] of S.onScreen) if (S.frameNo - e.lastSeen > ONSCREEN_TTL) S.onScreen.delete(k);
-  renderOnScreen([...S.onScreen.values()], (data) => { pause(); openMatch(data); });
-}
-
-const voteKey = (m) => m.res.winner?.tconst || `?${m.res.candidates[0]?.tconst || m.res.norm}`;
-
-/** "● webgpu · 420 ms · 12 lines · 3 matches · 2 shown" */
-function showStats() {
-  if (!settings.get().showBoxes && S.mode === 'scanning') { status(''); return; }
-  status(S.mode === 'scanning' ? 'Scanning' : '');
-}
-
-function badgeLabel(res) {
-  if (!res.winner) return { label: '?', ambiguous: true };
-  return { label: `★ ${fmtRating(res.winner.rating)}${res.alternatives ? ` ·${res.alternatives}` : ''}`, ambiguous: false };
-}
-
-/** Append to history once per title per app run; returns the row id. */
-function recordHistory(m) {
-  const { res } = m;
-  const key = res.winner ? res.winner.tconst : `?${res.norm}`;
-  if (S.sessionSeen.has(key)) return S.sessionSeen.get(key);
-  const w = res.winner;
-  const row = history.add(w
-    ? { norm: res.norm, tconst: w.tconst, title: w.title, year: w.year, type: w.type, rating: w.rating }
-    : { norm: res.norm, tconst: null, title: res.candidates[0]?.title || m.text, year: null, type: null, rating: null });
-  S.sessionSeen.set(key, row.id);
-  appendHistory(row, openHistoryRow);
-  return row.id;
-}
-
-// =============== shutter ===============
-// Not live yet → start the visible live preview (aim + zoom first).
-// Live → freeze exactly what is on screen and OCR it once (no voting needed).
-$('#shutter').addEventListener('click', async (e) => {
-  e.stopPropagation();
-  if (S.mode !== 'scanning') { startScanning(); return; }
-  S.loopId++; // stop live loop
-  status('Scanning frame…');
-  try {
-    await ensureOcr();
-    await scanFrame({ snapshot: true });
-    pause();
-    status(S.badges.length ? '' : 'No titles recognised');
-    if (!S.badges.length) setTimeout(() => status(''), 2500);
-  } catch (err) {
-    status('');
-    toast(`Snapshot failed: ${err.message}`);
-  }
-});
-
-// =============== viewfinder interaction ===============
-$('#viewfinder').addEventListener('click', (e) => {
-  if (e.target.closest('button')) return;
-  if (performance.now() - lastPinchEnd < 400) return; // end of a pinch, not a tap
-  if (S.mode === 'scanning') $('#shutter').click(); // tap while live = freeze + scan this frame
-  else startScanning();
-});
-$('#resume').addEventListener('click', (e) => { e.stopPropagation(); startScanning(); });
-
-/** Share the frozen frame with all OCR boxes/texts + matches burnt in (for debugging OCR on real TVs). */
-$('#share-debug').addEventListener('click', async (e) => {
-  e.stopPropagation();
-  if (!raw.width) return;
-  const pad = 14, lineH = 22;
-  const lines = [
-    `ScreenRate debug · ${new Date().toISOString()} · ${ocrState.backend} ${ocrState.lastMs} ms · zoom ${Z.level}× · preprocess ${settings.get().preprocess}`,
-    ...(S.ocrItems || []).map((it) => `• ${it.text}  (${Math.round(it.confidence * 100)}%)`),
-    ...(S.lastMatches || []).map((m) => `→ "${m.text}" = ${m.res.winner ? `${m.res.winner.title} ${m.res.winner.year} ★${m.res.winner.rating}` : `? (${m.res.candidates.length} candidates)`}`),
-  ];
-  const out = document.createElement('canvas');
-  out.width = Math.max(raw.width, 900);
-  out.height = raw.height + pad * 2 + lines.length * lineH;
-  const g = out.getContext('2d');
-  g.fillStyle = '#000'; g.fillRect(0, 0, out.width, out.height);
-  g.drawImage(raw, 0, 0);
-  g.lineWidth = 2; g.font = '600 16px -apple-system, system-ui, sans-serif'; g.textBaseline = 'bottom';
-  const matched = new Set((S.lastMatches || []).flatMap((m) => m.parts || []));
-  for (const it of S.ocrItems || []) {
-    g.strokeStyle = matched.has(it) ? '#f5c518' : '#5ac8fa';
-    g.strokeRect(it.box.x, it.box.y, it.box.width, it.box.height);
-    g.fillStyle = matched.has(it) ? '#f5c518' : '#5ac8fa';
-    g.fillText(it.text, it.box.x, it.box.y - 2);
-  }
-  g.font = '15px ui-monospace, Menlo, monospace'; g.fillStyle = '#ddd'; g.textBaseline = 'top';
-  lines.forEach((l, i) => g.fillText(l, pad, raw.height + pad + i * lineH));
-  const blob = await new Promise((r) => out.toBlob(r, 'image/jpeg', 0.85));
-  const file = new File([blob], `screenrate-debug-${Date.now()}.jpg`, { type: 'image/jpeg' });
-  if (navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: 'ScreenRate debug frame' }); } catch { /* cancelled */ }
-  } else {
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: file.name });
-    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  }
-});
-
-// touching the history list pauses
-$('#history').addEventListener('touchstart', () => pause(), { passive: true });
-$('#history').addEventListener('wheel', () => pause(), { passive: true });
-
-// app backgrounded
-document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
-
-// phone pointed at the floor for ~2 s (lying flat, screen up)
-window.addEventListener('deviceorientation', (e) => {
-  if (S.mode !== 'scanning' || e.beta == null) return;
-  const flat = Math.abs(e.beta) < 25 && Math.abs(e.gamma) < 25;
-  if (!flat) { S.floorSince = 0; return; }
-  S.floorSince ||= performance.now();
-  if (performance.now() - S.floorSince > 2000) pause();
-});
-
-// Re-draw whenever the viewfinder changes size (pause/resume height transition, rotation).
-new ResizeObserver(() => {
-  if (!S.frameSize[0] || S.mode === 'scanning') return; // live: painter redraws every frame
-  overlay.render([], ...S.frameSize, S.mode === 'paused' ? raw : null);
-}).observe($('#viewfinder'));
-
-// =============== detail / picker ===============
-function openMatch({ res, text, rowId }) {
+// =============== detail ===============
+/** Open a title (row object or tconst): detail sheet with similar titles; remembers it as recently opened. */
+function openTitle(t) {
+  const title = tdb.get(typeof t === 'string' ? t : t.tconst);
+  if (!title) return toast('Title not in the database');
+  history.add(title);
+  let similar = tdb.similar(title.tconst);
+  if (!similar.length) similar = tdb.sameGenre(title.tconst);
   openSheet({
-    title: res.winner,
-    candidates: res.candidates,
-    norm: res.norm,
-    seenText: text,
-    onChoose: (chosen) => onUserChoice(res.norm, chosen, rowId),
+    title,
+    similar,
+    recommend: recommendationsFor(tdb, title.tconst),
+    onOpen: openTitle,
+    onClose: () => { if (!q.value.trim()) showResults(); if (!$('#view-watchlist').hidden) renderWatchlist(openTitle); },
   });
 }
-
-/** User picked/switched a title: remember, update the history row in place, refresh badges. */
-function onUserChoice(norm, chosen, rowId) {
-  S.lookups.clear();
-  if (rowId) {
-    const row = history.update(rowId, { tconst: chosen.tconst, title: chosen.title, year: chosen.year, type: chosen.type, rating: chosen.rating });
-    if (row) refreshHistoryRow(row);
-  }
-  const chosenRes = (res) => ({ ...res, winner: chosen, ambiguous: false, how: 'remembered' });
-  S.lastMatches = S.lastMatches.map((m) => (m.res.norm === norm ? { ...m, res: chosenRes(m.res) } : m));
-  S.badges = S.badges.map((b) => {
-    if (b.data.res.norm !== norm) return b;
-    const res = { ...b.data.res, winner: chosen, ambiguous: false, how: 'remembered' };
-    return { ...b, ...badgeLabel(res), data: { ...b.data, res } };
-  });
-  for (const e of S.onScreen.values()) if (e.data.res.norm === norm) e.data = { ...e.data, res: chosenRes(e.data.res) };
-  renderOnScreen([...S.onScreen.values()], (data) => { pause(); openMatch(data); });
-  if (S.mode === 'paused') overlay.render([], ...S.frameSize, raw);
-}
-
-function openHistoryRow(row) {
-  pause();
-  const res = resolve(tdb, row.norm || row.title, { remembered: remembered.all() });
-  const title = row.tconst ? (tdb.get(row.tconst) || res?.winner) : (res?.how === 'remembered' ? res.winner : null);
-  const candidates = res?.candidates || (title ? [title] : []);
-  if (title && !candidates.some((c) => c.tconst === title.tconst)) candidates.unshift(title);
-  openSheet({
-    title, candidates, norm: row.norm, seenText: row.tconst ? null : row.title,
-    onChoose: (chosen) => onUserChoice(row.norm, chosen, row.id),
-  });
-}
-
-function openTconst(tconst) {
-  const t = tdb.get(tconst);
-  if (!t) return toast('Title no longer in the database');
-  openSheet({ title: t, candidates: [t], onClose: () => renderWatchlist(openTconst) });
-}
-
-// manual input (debug aid): same pipeline, no camera
-$('#manual').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const input = $('#manual-input');
-  const text = input.value.trim();
-  if (!text) return;
-  pause();
-  const res = resolve(tdb, text, { remembered: remembered.all() });
-  input.blur();
-  if (!res) return toast(`No match for “${text}”`);
-  const rowId = recordHistory({ res, text });
-  openMatch({ res, text, rowId });
-  input.value = '';
-});
 
 // =============== settings ===============
 function renderSettings() {
   const s = settings.get();
   $('#tmdb-key').value = s.tmdbKey;
-  $('#fps').value = String(s.fps);
-  $('#preprocess').checked = s.preprocess;
-  $('#show-boxes').checked = s.showBoxes;
   if (tdb) {
     const m = tdb.meta();
     const built = m.built_at ? new Date(m.built_at.replace(' ', 'T') + 'Z').toLocaleString('de-CH') : '–';
-    $('#stats').innerHTML = `<dt>Built</dt><dd>${built}</dd><dt>Titles</dt><dd>${Number(m.title_count).toLocaleString('de-CH')}</dd>
-      <dt>DE/CH/AT titles</dt><dd>${Number(m.aka_count).toLocaleString('de-CH')}</dd><dt>Min. votes</dt><dd>${m.min_votes}</dd>`;
+    const num = (v) => (v ? Number(v).toLocaleString('de-CH') : '–');
+    $('#stats').innerHTML = `<dt>Built</dt><dd>${built}</dd><dt>Titles</dt><dd>${num(m.title_count)}</dd>
+      <dt>DE/CH/AT titles</dt><dd>${num(m.aka_count)}</dd><dt>Similar lists</dt><dd>${num(m.similar_count)}</dd>
+      <dt>Min. votes</dt><dd>${m.min_votes ?? '–'}</dd>`;
   }
-  const rememberedCount = Object.keys(remembered.all()).length;
-  $('#clear-remembered').textContent = `Clear remembered choices (${rememberedCount})`;
-  $('#clear-history').textContent = `Clear history (${history.all().length})`;
-  $('#ocr-stats').innerHTML = `<dt>Backend</dt><dd>${ocrState.backend || 'not loaded yet'}</dd>
-    <dt>Last frame</dt><dd>${ocrState.lastMs != null ? ocrState.lastMs + ' ms' : '–'}</dd>
-    <dt>WebGPU</dt><dd>${'gpu' in navigator ? 'available' : 'not available'}</dd>`;
+  $('#clear-history').textContent = `Clear recently opened (${history.all().length})`;
 }
 
 $('#tmdb-key').addEventListener('change', (e) => { settings.set({ tmdbKey: e.target.value.trim() }); posterCache.clear(); toast('Saved'); });
-$('#fps').addEventListener('change', (e) => settings.set({ fps: Number(e.target.value) }));
-$('#preprocess').addEventListener('change', (e) => settings.set({ preprocess: e.target.checked }));
-$('#show-boxes').addEventListener('change', (e) => settings.set({ showBoxes: e.target.checked }));
-$('#clear-remembered').addEventListener('click', () => { remembered.clear(); S.lookups.clear(); renderSettings(); toast('Remembered choices cleared'); });
-$('#clear-history').addEventListener('click', () => {
-  history.clear(); S.sessionSeen.clear(); renderHistory(openHistoryRow); renderSettings(); toast('History cleared');
-});
+$('#clear-history').addEventListener('click', () => { history.clear(); renderSettings(); showResults(); toast('Cleared'); });
 $('#lock').addEventListener('click', async () => { await forgetKey(); location.reload(); });
-$('#update-data').addEventListener('click', async (e) => {
-  const btn = e.currentTarget, prog = $('#update-progress');
+$('#update-data').addEventListener('click', () => refreshData({ quiet: false }));
+
+async function refreshData({ quiet }) {
+  const btn = $('#update-data'), prog = $('#update-progress');
   btn.disabled = true; btn.textContent = 'Downloading…';
   try {
     const fresh = await openDatabase({ force: true, onProgress: (g, t) => { prog.hidden = false; prog.value = t ? g / t : 0; } });
     tdb?.db.close();
     tdb = fresh;
-    S.lookups.clear();
     renderSettings();
-    toast('Data updated');
+    showResults();
+    if (!quiet) toast('Data updated');
   } catch (err) {
-    toast(`Update failed: ${err.message}`);
+    if (!quiet) toast(`Update failed: ${err.message}`);
   } finally {
     btn.disabled = false; btn.textContent = 'Update data'; prog.hidden = true;
   }
-});
+}
 
 // =============== service worker ===============
 function registerServiceWorker() {
@@ -587,23 +156,6 @@ function registerServiceWorker() {
   navigator.serviceWorker.register('./sw.js').catch(() => { /* offline support is best-effort */ });
 }
 
-// exposed for debugging in the console / smoke tests
-window.screenrate = {
-  get tdb() { return tdb; },
-  S,
-  ocrState,
-  overlay,
-  resolve: (t) => resolve(tdb, t, { remembered: remembered.all() }),
-  /** Run the snapshot pipeline on any image/canvas instead of the camera (debugging). */
-  async snapshotFrom(source) {
-    raw.width = source.width; raw.height = source.height;
-    raw.getContext('2d').drawImage(source, 0, 0);
-    await ensureOcr();
-    setMode('scanning');
-    await ocrRaw({ snapshot: true });
-    pause();
-    return S.badges.map((b) => ({ label: b.label, text: b.data.text, title: b.data.res.winner?.title ?? null }));
-  },
-};
+window.screenrate = { get tdb() { return tdb; }, search: (s) => searchTitles(tdb, s), openTitle, closeSheet };
 
 boot();

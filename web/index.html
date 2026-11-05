@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#000000">
@@ -15,7 +15,7 @@
   <link rel="icon" href="./icon-192.png">
   <title>ScreenRate</title>
 </head>
-<body data-state="loading">
+<body>
   <!-- Boot / unlock -->
   <section id="unlock" class="unlock" hidden>
     <h1>Screen<span class="accent">Rate</span></h1>
@@ -34,49 +34,27 @@
   <!-- App -->
   <div id="app" class="app" hidden>
     <main>
-      <section id="view-scan" class="view">
-        <div id="viewfinder" class="viewfinder">
-          <video id="video" playsinline muted autoplay></video>
-          <canvas id="overlay"></canvas>
-          <div id="vf-hint" class="vf-hint">Tap to start the camera</div>
-          <div id="vf-status" class="vf-status" role="status"></div>
-          <button id="resume" class="vf-resume" type="button">Resume</button>
-          <button id="zoom" class="vf-zoom" type="button" aria-label="Zoom">1×</button>
-          <button id="share-debug" class="vf-share" type="button" aria-label="Share debug frame">Share frame</button>
-          <button id="shutter" class="shutter" type="button" aria-label="Snapshot"></button>
-        </div>
-        <h3 class="list-head">On screen now <span id="onscreen-count" class="count"></span></h3>
-        <ol id="onscreen" class="list onscreen"></ol>
-        <form id="manual" class="manual" autocomplete="off">
-          <input id="manual-input" type="search" placeholder="Type a title…" enterkeyhint="search" autocapitalize="off" spellcheck="false">
+      <section id="view-search" class="view">
+        <form id="search-form" class="searchbar" role="search" autocomplete="off">
+          <input id="q" type="search" placeholder="Film or series title…" enterkeyhint="search"
+                 autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Search titles">
         </form>
-        <h3 class="list-head">History</h3>
-        <ol id="history" class="list history"></ol>
+        <h3 id="list-head" class="list-head">Recently opened</h3>
+        <ol id="results" class="list results" aria-live="polite"></ol>
+        <p id="results-empty" class="empty" hidden></p>
       </section>
 
       <section id="view-watchlist" class="view" hidden>
         <h2 class="view-title">Watchlist</h2>
-        <ol id="watchlist" class="list"></ol>
-        <p id="watchlist-empty" class="empty">Nothing here yet. Add titles from their detail sheet.<br>Swipe left or long-press to remove.</p>
+        <ol id="watchlist" class="list results"></ol>
+        <p id="watchlist-empty" class="empty">Nothing here yet. Add titles from their detail page.<br>Swipe left or long-press to remove.</p>
       </section>
 
       <section id="view-settings" class="view settings" hidden>
         <h2 class="view-title">Settings</h2>
         <div class="group">
-          <label for="tmdb-key">TMDB API key <span class="muted">(optional, for posters)</span></label>
+          <label for="tmdb-key">TMDB API key <span class="muted">(optional: posters + recommendations)</span></label>
           <input id="tmdb-key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="v3 key or v4 read token">
-        </div>
-        <div class="group row">
-          <label for="fps">Scan rate</label>
-          <select id="fps"><option value="2">2 fps</option><option value="3">3 fps</option><option value="4">4 fps</option></select>
-        </div>
-        <div class="group row">
-          <label for="preprocess">TV preprocessing <span class="muted">(invert + threshold)</span></label>
-          <input id="preprocess" type="checkbox">
-        </div>
-        <div class="group row">
-          <label for="show-boxes">Show text outlines <span class="muted">(what the camera reads)</span></label>
-          <input id="show-boxes" type="checkbox">
         </div>
         <div class="group">
           <h3>Data</h3>
@@ -84,13 +62,8 @@
           <button id="update-data" type="button">Update data</button>
           <progress id="update-progress" max="1" value="0" hidden></progress>
         </div>
-        <div class="group">
-          <h3>OCR</h3>
-          <dl id="ocr-stats" class="stats"></dl>
-        </div>
         <div class="group buttons">
-          <button id="clear-remembered" type="button">Clear remembered choices</button>
-          <button id="clear-history" type="button">Clear history</button>
+          <button id="clear-history" type="button">Clear recently opened</button>
           <button id="lock" type="button" class="danger">Forget passphrase</button>
         </div>
         <p class="credit">Information courtesy of IMDb (<a href="https://www.imdb.com">https://www.imdb.com</a>). Used with permission. Personal, non-commercial use only.</p>
@@ -98,13 +71,13 @@
     </main>
 
     <nav class="tabs" aria-label="Sections">
-      <button type="button" data-view="scan" class="active">Scan</button>
+      <button type="button" data-view="search" class="active">Search</button>
       <button type="button" data-view="watchlist">Watchlist</button>
       <button type="button" data-view="settings">Settings</button>
     </nav>
   </div>
 
-  <!-- Detail sheet / picker -->
+  <!-- Detail sheet -->
   <div id="sheet" class="sheet" hidden>
     <div class="sheet-backdrop" data-close></div>
     <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">

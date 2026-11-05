@@ -1,13 +1,17 @@
-// DOM rendering: history list, watchlist, detail sheet / picker, toast.
-import { history, watchlist, remembered } from './store.js';
+// DOM rendering: result rows, watchlist, detail sheet with similar titles, toast.
+import { watchlist } from './store.js';
 import { posterFor } from './tmdb.js';
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const TYPE_LABEL = { movie: 'Film', tvSeries: 'Series', tvMiniSeries: 'Mini-series' };
 export const fmtRating = (r) => (r == null ? '–' : Number(r).toFixed(1));
-const fmtVotes = (v) => Number(v).toLocaleString('de-CH');
+const fmtVotes = (v) => {
+  const n = Number(v);
+  return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n);
+};
 const typeLabel = (t) => TYPE_LABEL[t] || t || '';
+export const imdbUrl = (tconst) => `https://www.imdb.com/title/${tconst}/`;
 
 // ---------- toast ----------
 let toastTimer;
@@ -20,61 +24,27 @@ export function toast(msg, action) {
   toastTimer = setTimeout(() => { el.hidden = true; }, action ? 5000 : 2500);
 }
 
-// ---------- history ----------
-function historyRowHtml(r) {
-  const known = !!r.tconst;
-  return `<div class="t"><b>${esc(r.title)}</b><small>${known ? [r.year, typeLabel(r.type)].filter(Boolean).join(' · ') : 'Tap to pick the right title'}</small></div>
-    <span class="rating ${known ? '' : 'q'}">${known ? fmtRating(r.rating) : '?'}</span>`;
+// ---------- result rows (search results, recently opened, watchlist) ----------
+function rowHtml(t) {
+  const sub = [t.year, typeLabel(t.type)].filter(Boolean).join(' · ');
+  return `<div class="t"><b>${esc(t.title)}</b>
+      <small>${esc(sub)}${t.akaTitle ? ` · <i>${esc(t.akaTitle)}</i>` : ''}</small></div>
+    <div class="r"><span class="rating">★ ${fmtRating(t.rating)}</span>${t.votes ? `<small>${fmtVotes(t.votes)}</small>` : ''}</div>
+    <a class="imdb" href="${imdbUrl(t.tconst)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(t.title)} on IMDb">IMDb</a>`;
 }
 
-export function renderHistory(onOpen) {
-  const ol = $('#history');
+/** Render rows into `ol`; tapping a row opens it, the IMDb pill opens IMDb. */
+export function renderRows(ol, rows, onOpen) {
   ol.innerHTML = '';
-  for (const r of history.all()) ol.append(historyLi(r, onOpen));
-  ol.scrollTop = ol.scrollHeight;
+  for (const t of rows) ol.append(rowLi(t, onOpen));
 }
 
-function historyLi(r, onOpen) {
+function rowLi(t, onOpen) {
   const li = document.createElement('li');
-  li.dataset.id = r.id;
-  li.innerHTML = historyRowHtml(r);
-  li.onclick = () => onOpen(history.all().find((x) => x.id === r.id) || r);
+  li.innerHTML = rowHtml(t);
+  li.querySelector('.imdb').addEventListener('click', (e) => e.stopPropagation());
+  li.addEventListener('click', () => onOpen(t));
   return li;
-}
-
-/** Append a row at the bottom (existing rows never move). */
-export function appendHistory(r, onOpen) {
-  const ol = $('#history');
-  const atBottom = ol.scrollHeight - ol.scrollTop - ol.clientHeight < 40;
-  const li = historyLi(r, onOpen);
-  li.classList.add('fresh');
-  ol.append(li);
-  if (atBottom) ol.scrollTop = ol.scrollHeight;
-}
-
-/** Update a row in place (after the user picked/switched the title). */
-export function refreshHistoryRow(r) {
-  const li = $(`#history li[data-id="${CSS.escape(r.id)}"]`);
-  if (li) li.innerHTML = historyRowHtml(r);
-}
-
-// ---------- on screen now ----------
-/** entries: [{data:{res, text}, firstSeen}] — rendered in first-seen order so rows never jump. */
-export function renderOnScreen(entries, onOpen) {
-  const ol = $('#onscreen');
-  const sorted = [...entries].sort((a, b) => a.firstSeen - b.firstSeen);
-  ol.innerHTML = '';
-  for (const e of sorted) {
-    const { res, text } = e.data;
-    const w = res.winner;
-    const li = document.createElement('li');
-    li.innerHTML = w
-      ? `<div class="t"><b>${esc(w.title)}</b><small>${[w.year, typeLabel(w.type)].filter(Boolean).join(' · ')}${res.alternatives ? ` · ${res.alternatives} other match${res.alternatives > 1 ? 'es' : ''}` : ''}</small></div><span class="rating">${fmtRating(w.rating)}</span>`
-      : `<div class="t"><b>${esc(res.candidates[0]?.title || text)}</b><small>${res.candidates.length} matches · tap to pick</small></div><span class="rating q">?</span>`;
-    li.onclick = () => onOpen(e.data);
-    ol.append(li);
-  }
-  $('#onscreen-count').textContent = sorted.length ? String(sorted.length) : '';
 }
 
 // ---------- watchlist ----------
@@ -85,12 +55,12 @@ export function renderWatchlist(onOpen) {
   $('#watchlist-empty').hidden = rows.length > 0;
   for (const w of rows) {
     const li = document.createElement('li');
-    li.innerHTML = `<div class="t"><b>${esc(w.title)}</b><small>${esc(w.year ?? '')}</small></div><span class="rating">${fmtRating(w.rating)}</span>`;
+    li.innerHTML = rowHtml(w);
     attachRemoveGestures(li, () => {
       watchlist.remove(w.tconst);
       renderWatchlist(onOpen);
       toast(`Removed “${w.title}”`, { label: 'Undo', run: () => { watchlist.restore(w); renderWatchlist(onOpen); } });
-    }, () => onOpen(w.tconst));
+    }, () => onOpen(w));
     ol.append(li);
   }
 }
@@ -98,7 +68,9 @@ export function renderWatchlist(onOpen) {
 /** Swipe left (>90px) or long-press (600ms) removes; a plain tap opens. */
 function attachRemoveGestures(li, onRemove, onTap) {
   let x0 = 0, y0 = 0, dx = 0, pressTimer = null, moved = false, removed = false;
+  li.querySelector('.imdb').addEventListener('click', (e) => e.stopPropagation());
   li.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.imdb')) return;
     x0 = e.clientX; y0 = e.clientY; dx = 0; moved = false; removed = false;
     pressTimer = setTimeout(() => { removed = true; navigator.vibrate?.(20); onRemove(); }, 600);
   });
@@ -107,14 +79,13 @@ function attachRemoveGestures(li, onRemove, onTap) {
     if (Math.abs(mx) > 8 || Math.abs(my) > 8) { moved = true; clearTimeout(pressTimer); }
     if (Math.abs(mx) > Math.abs(my)) { dx = Math.min(0, mx); li.style.transform = `translateX(${dx}px)`; }
   });
-  const end = () => {
+  li.addEventListener('pointerup', (e) => {
     clearTimeout(pressTimer);
-    if (removed) return;
+    if (removed || e.target.closest('.imdb')) return;
     if (dx < -90) { removed = true; onRemove(); return; }
     li.style.transform = '';
     if (!moved) onTap();
-  };
-  li.addEventListener('pointerup', end);
+  });
   li.addEventListener('pointercancel', () => { clearTimeout(pressTimer); li.style.transform = ''; });
   li.addEventListener('contextmenu', (e) => e.preventDefault());
 }
@@ -132,7 +103,6 @@ function setupSheetOnce() {
   if (setupSheetOnce.done) return;
   setupSheetOnce.done = true;
   $('#sheet').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeSheet(); });
-  // swipe the panel down to close
   const panel = $('.sheet-panel');
   let y0 = null;
   panel.addEventListener('touchstart', (e) => { y0 = panel.scrollTop <= 0 ? e.touches[0].clientY : null; }, { passive: true });
@@ -145,7 +115,7 @@ function setupSheetOnce() {
 function cardHtml(c) {
   return `<button type="button" class="card" data-tconst="${esc(c.tconst)}">
     <div class="poster" data-poster="${esc(c.tconst)}">${esc(c.title)}</div>
-    <span><b>${esc(c.title)}</b>${esc(c.year ?? '')} · ${esc(typeLabel(c.type))} · ★ ${fmtRating(c.rating)}</span></button>`;
+    <span><b>${esc(c.title)}</b>${esc(c.year ?? '')} · ★ ${fmtRating(c.rating)}</span></button>`;
 }
 
 function fillPosters(root) {
@@ -159,56 +129,60 @@ function fillPosters(root) {
   }
 }
 
+function stripSection(id, heading, rows) {
+  return `<section id="${id}" ${rows.length ? '' : 'hidden'}><h3>${esc(heading)}</h3>
+    <div class="strip">${rows.map(cardHtml).join('')}</div></section>`;
+}
+
 /**
- * Show details for `title`, or a picker when `title` is null.
- * @param opts {title, candidates, norm, seenText, onChoose(tconst)}
+ * Detail sheet for `title`.
+ * @param similar   local IMDb-based similar titles (sync)
+ * @param recommend Promise of TMDB recommendations (optional; shown on top when it resolves non-empty)
+ * @param onOpen    open another title (a tapped card)
  */
-export function openSheet({ title, candidates = [], norm, seenText, onChoose, onClose }) {
+export function openSheet({ title, similar = [], recommend, onOpen, onClose }) {
   setupSheetOnce();
   sheetOnClose = onClose || null;
   const body = $('#sheet-body');
-  const others = candidates.filter((c) => !title || c.tconst !== title.tconst);
+  const inWl = watchlist.has(title.tconst);
+  const sub = [title.year, typeLabel(title.type),
+    title.originalTitle && title.originalTitle !== title.title ? `“${title.originalTitle}”` : ''].filter(Boolean).join(' · ');
+  body.innerHTML = `
+    <div class="detail-head">
+      <div class="ph" data-poster="${esc(title.tconst)}"></div>
+      <div><h2 id="sheet-title">${esc(title.title)}</h2><p class="sub">${esc(sub)}</p>
+        ${title.genres ? `<p class="sub genres">${esc(title.genres.replaceAll(',', ' · '))}</p>` : ''}</div>
+    </div>
+    <div class="big-rating"><span class="rating">★ ${fmtRating(title.rating)}</span><small>${Number(title.votes).toLocaleString('de-CH')} votes on IMDb</small></div>
+    <div class="links">
+      <a href="${imdbUrl(title.tconst)}" target="_blank" rel="noopener noreferrer">IMDb</a>
+      <a href="https://letterboxd.com/imdb/${esc(title.tconst)}/" target="_blank" rel="noopener noreferrer">Letterboxd</a>
+    </div>
+    <button type="button" class="wl-btn ${inWl ? 'on' : ''}">${inWl ? '✓ On watchlist' : '+ Add to watchlist'}</button>
+    ${stripSection('recs', 'Recommended (TMDB)', [])}
+    ${stripSection('similar', 'Similar', similar)}`;
 
-  if (!title) {
-    body.innerHTML = `<h2 id="sheet-title" style="margin:0 0 .3rem">Which one?</h2>
-      ${seenText ? `<p class="seen">Seen on screen: “${esc(seenText)}”</p>` : ''}
-      <div class="strip">${others.map(cardHtml).join('')}</div>
-      <p class="seen">Your choice is remembered for this title.</p>`;
-  } else {
-    const inWl = watchlist.has(title.tconst);
-    const sub = [title.year, typeLabel(title.type),
-      title.originalTitle && title.originalTitle !== title.title ? `“${title.originalTitle}”` : ''].filter(Boolean).join(' · ');
-    body.innerHTML = `
-      <div class="detail-head">
-        <div class="ph" data-poster="${esc(title.tconst)}"></div>
-        <div><h2 id="sheet-title">${esc(title.title)}</h2><p class="sub">${esc(sub)}</p></div>
-      </div>
-      <div class="big-rating"><span class="rating">★ ${fmtRating(title.rating)}</span><small>${fmtVotes(title.votes)} votes on IMDb</small></div>
-      <div class="links">
-        <a href="https://www.imdb.com/title/${esc(title.tconst)}/" target="_blank" rel="noopener noreferrer">IMDb</a>
-        <a href="https://letterboxd.com/imdb/${esc(title.tconst)}/" target="_blank" rel="noopener noreferrer">Letterboxd</a>
-      </div>
-      <button type="button" class="wl-btn ${inWl ? 'on' : ''}">${inWl ? '✓ On watchlist' : '+ Add to watchlist'}</button>
-      ${others.length ? `<h3>Not this one? ${others.length} other match${others.length > 1 ? 'es' : ''}</h3>
-        <div class="strip">${others.map(cardHtml).join('')}</div>` : ''}`;
-    const btn = body.querySelector('.wl-btn');
-    btn.onclick = () => {
-      if (watchlist.has(title.tconst)) watchlist.remove(title.tconst); else watchlist.add(title);
-      const on = watchlist.has(title.tconst);
-      btn.classList.toggle('on', on);
-      btn.textContent = on ? '✓ On watchlist' : '+ Add to watchlist';
-    };
-  }
+  const btn = body.querySelector('.wl-btn');
+  btn.onclick = () => {
+    if (watchlist.has(title.tconst)) watchlist.remove(title.tconst); else watchlist.add(title);
+    const on = watchlist.has(title.tconst);
+    btn.classList.toggle('on', on);
+    btn.textContent = on ? '✓ On watchlist' : '+ Add to watchlist';
+  };
 
-  for (const card of body.querySelectorAll('.card')) {
-    card.onclick = () => {
-      const chosen = candidates.find((c) => c.tconst === card.dataset.tconst);
-      if (norm) remembered.set(norm, chosen.tconst);
-      onChoose?.(chosen);
-      openSheet({ title: chosen, candidates, norm, seenText, onChoose, onClose: sheetOnClose });
-    };
-  }
-  fillPosters(body);
+  const wireCards = (root) => {
+    for (const card of root.querySelectorAll('.card')) card.onclick = () => onOpen(card.dataset.tconst);
+    fillPosters(root);
+  };
+  wireCards(body);
+
+  recommend?.then((rows) => {
+    const sec = body.querySelector('#recs');
+    if (!rows.length || !sec?.isConnected || $('#sheet-title')?.textContent !== title.title) return;
+    sec.outerHTML = stripSection('recs', 'Recommended (TMDB)', rows);
+    wireCards(body.querySelector('#recs'));
+  });
+
   $('#sheet').hidden = false;
   $('.sheet-panel').scrollTop = 0;
 }

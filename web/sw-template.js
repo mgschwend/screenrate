@@ -1,13 +1,12 @@
 // ScreenRate service worker (generated at build time by vite.config.js from sw-template.js).
 // - App shell: precached, cache-first (versioned per build).
-// - OCR models (Hugging Face) + onnxruntime wasm (jsDelivr) + TMDB posters: runtime cache-first.
+// - TMDB posters: runtime cache-first.
 // - imdb.sqlite.enc: NOT handled here; the app keeps it in its own Cache Storage entry ("Update data").
 const VERSION = '__VERSION__';
 const ASSETS = __ASSETS__;
 const SHELL = `screenrate-shell-${VERSION}`;
 const RUNTIME = 'screenrate-runtime';
-const RUNTIME_HOSTS = [/(^|\.)huggingface\.co$/, /(^|\.)hf\.co$/, /^cdn\.jsdelivr\.net$/, /^image\.tmdb\.org$/,
-  /(^|\.)xethub\.hf\.co$/, /^cas-bridge\.xethub\.hf\.co$/];
+const RUNTIME_HOSTS = [/^image\.tmdb\.org$/];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(['./', ...ASSETS])).then(() => self.skipWaiting()));
@@ -35,7 +34,7 @@ self.addEventListener('fetch', (e) => {
       }).catch(() => caches.match('./')));
       return;
     }
-    // cache-first; big files (onnxruntime wasm) are not precached and land here on first use
+    // cache-first; anything not precached lands here on first use
     e.respondWith(caches.match(req).then((hit) => hit || fetch(req).then((res) => {
       if (res.ok && res.type === 'basic') { const copy = res.clone(); caches.open(SHELL).then((c) => c.put(req, copy)); }
       return res;

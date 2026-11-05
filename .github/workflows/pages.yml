@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
-      - run: pip install pandas cryptography
+      - run: pip install pandas numpy cryptography
 
       - uses: actions/setup-node@v7
         with:
@@ -40,6 +40,9 @@ jobs:
 
       - name: Build imdb.sqlite
         run: python scripts/build_imdb_db.py --akas --min-votes 1000 --out "$RUNNER_TEMP/imdb.sqlite" --cache "$RUNNER_TEMP/imdb_cache"
+
+      - name: Add genres + similar titles
+        run: python scripts/add_similar.py "$RUNNER_TEMP/imdb.sqlite" --cache "$RUNNER_TEMP/imdb_cache"
 
       - name: Encrypt database
         env:
