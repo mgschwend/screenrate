@@ -56,8 +56,7 @@ progress { width: 100%; accent-color: var(--accent); }
 body[data-state=scanning] .viewfinder { height: 66vh; }
 body[data-state=paused] .viewfinder { height: 30vh; }
 .viewfinder video, .viewfinder canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.viewfinder video { opacity: 0; transform-origin: 50% 50%; transition: transform .08s linear; }
-body[data-state=scanning] .viewfinder video { opacity: 1; }
+.viewfinder video { opacity: 0; pointer-events: none; } /* frames are painted onto #overlay */
 .vf-hint {
   position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none;
   padding-top: env(safe-area-inset-top);
@@ -158,3 +157,20 @@ input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent); }
   background: rgba(0,0,0,.6); border-color: #555; color: var(--accent); font-weight: 700; font-size: .9rem; display: none;
 }
 body[data-state=scanning] .vf-zoom { display: block; }
+
+.vf-share {
+  position: absolute; left: .6rem; bottom: .6rem; background: rgba(0,0,0,.65); border-color: #444; font-size: .85rem;
+  padding: .45rem .7rem; display: none;
+}
+body[data-state=paused] .vf-share { display: block; }
+.vf-status::before {
+  content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #555;
+  margin-right: .4rem; vertical-align: 1px;
+}
+body[data-state=scanning] .vf-status::before { background: #34c759; }
+.vf-status.busy::before { background: var(--accent); animation: pulse .6s ease-in-out infinite alternate; }
+@keyframes pulse { from { opacity: .3; transform: scale(.8); } to { opacity: 1; transform: scale(1.2); } }
+/* thin scanning frame so it is obvious the camera is live */
+body[data-state=scanning] .viewfinder::after {
+  content: ''; position: absolute; inset: 0; border: 2px solid rgba(52,199,89,.55); pointer-events: none;
+}

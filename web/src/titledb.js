@@ -17,9 +17,11 @@ export class TitleDb {
   }
 
   /** FTS5 prefix match requiring every word ("dun* par* two*"). */
-  prefix(norm, limit = 60) {
-    const words = norm.split(' ').filter(Boolean);
+  prefix(norm, limit = 60, { loose = false } = {}) {
+    let words = norm.split(' ').filter(Boolean);
     if (!words.length) return [];
+    // loose: tolerate OCR errors at word ends ("inceptior" → "incep*", "breaklng" → "break*")
+    if (loose) words = words.map((w) => (w.length > 4 ? w.slice(0, Math.max(3, Math.ceil(w.length * 0.6))) : w));
     const q = words.map((w) => `"${w}"*`).join(' ');
     try {
       return this.db.selectObjects(

@@ -31,6 +31,8 @@ const STOP_PHRASES = [
   'watchlist', 'merkliste', 'downloads', 'download', 'rent', 'buy', 'leihen', 'kaufen', 'included with prime',
   'in prime enthalten', 'free', 'gratis', 'ad', 'ads', 'werbung', 'skip intro', 'intro uberspringen',
   'next episode', 'nachste folge', 'back', 'zuruck', 'ok', 'cancel', 'abbrechen', 'yes', 'no', 'ja', 'nein',
+  'watched', 'you ve watched', 'trailers you ve watched', 'new season', 'neue staffel', 'new episodes weekly',
+  'watch it again', 'nochmals ansehen', 'your next watch', 'today s top picks for you', 'we think you ll love these',
 ];
 const STOP = new Set(STOP_PHRASES.map(normalize));
 const STOP_PATTERNS = [
@@ -47,7 +49,7 @@ export const MAX_WORDS = 7;
 
 /** Should this OCR string be ignored before any DB lookup? (`norm` = normalize(raw)). */
 export function isStop(norm) {
-  if (!norm || norm.replace(/ /g, '').length < 2) return true;
+  if (!norm || norm.replace(/ /g, '').length < 3) return true; // "ed", "Mo": too short for noisy OCR
   if (norm.split(' ').length > MAX_WORDS) return true; // descriptions, synopses
   if (STOP.has(norm)) return true;
   return STOP_PATTERNS.some((re) => re.test(norm));
@@ -76,11 +78,37 @@ export function dice(a, b) {
 export function findCandidates(tdb, norm) {
   const exact = tdb.exact(norm);
   if (exact.length) return { candidates: exact, how: 'exact' };
-  const fuzzy = tdb.prefix(norm)
-    .map((c) => ({ ...c, score: Math.max(dice(norm, c.normTitle), c.normOriginal ? dice(norm, c.normOriginal) : 0) }))
+  const score = (rows, q = norm) => rows
+    .map((c) => ({ ...c, score: Math.max(dice(q, c.normTitle), c.normOriginal ? dice(q, c.normOriginal) : 0) }))
     .filter((c) => c.score >= DICE_MIN)
     .sort((x, y) => y.votes - x.votes);
+  if (norm.replace(/ /g, '').length < 5) return { candidates: [], how: 'none' }; // fuzzy on 3–4 letters = noise ("w ha" → "Wham!")
+  let fuzzy = score(tdb.prefix(norm));
+  if (!fuzzy.length && norm.replace(/ /g, '').length >= 5) fuzzy = score(tdb.prefix(norm, 200, { loose: true }));
+  if (!fuzzy.length && norm.replace(/ /g, '').length >= 4) {
+    // typical OCR glyph confusions; similarity is still scored against what was actually read
+    for (const v of ocrVariants(norm)) {
+      const exact = tdb.exact(v);
+      if (exact.length) { fuzzy = exact; break; }
+      fuzzy = score(tdb.prefix(v, 200, { loose: true }), v);
+      if (fuzzy.length) break;
+    }
+  }
   return { candidates: fuzzy, how: fuzzy.length ? 'fuzzy' : 'none' };
+}
+
+const OCR_SWAPS = [['l', 'i'], ['1', 'i'], ['i', 'l'], ['1', 'l'], ['rn', 'm'], ['0', 'o'], ['5', 's'], ['q', 'g'],
+  ['vv', 'w'], ['o', 'c'], ['c', 'o'], ['e', 'c'], ['c', 'e'], ['u', 'v'], ['v', 'u']];
+const MAX_VARIANTS = 40;
+/** Single-substitution variants (one confusable glyph fixed at a time), most common confusions first. */
+export function ocrVariants(norm) {
+  const out = new Set();
+  for (const [from, to] of OCR_SWAPS) {
+    for (let i = norm.indexOf(from); i !== -1 && out.size < MAX_VARIANTS; i = norm.indexOf(from, i + 1)) {
+      out.add(norm.slice(0, i) + to + norm.slice(i + from.length));
+    }
+  }
+  return [...out];
 }
 
 /**

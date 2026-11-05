@@ -13,9 +13,20 @@ const read = (k, fallback) => {
 };
 const write = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 
+const SETTINGS_SCHEMA = 2;
 export const settings = {
-  defaults: { tmdbKey: '', fps: 3, preprocess: true, minConfidence: 0.6, zoom: 1 },
-  get() { return { ...this.defaults, ...read(K.settings, {}) }; },
+  // preprocess off: on real TV footage invert+threshold destroyed most text (16 → 7 lines, mostly garbage)
+  defaults: { tmdbKey: '', fps: 3, preprocess: false, minConfidence: 0.5, zoom: 1, showBoxes: true, schema: SETTINGS_SCHEMA },
+  get() {
+    const stored = read(K.settings, {});
+    if (stored.schema !== SETTINGS_SCHEMA) { // migrate: older builds saved preprocess=true / minConfidence=0.6
+      const { tmdbKey = '', fps = 3, zoom = 1 } = stored;
+      const migrated = { ...this.defaults, tmdbKey, fps, zoom };
+      write(K.settings, migrated);
+      return migrated;
+    }
+    return { ...this.defaults, ...stored };
+  },
   set(patch) { write(K.settings, { ...this.get(), ...patch }); },
 };
 

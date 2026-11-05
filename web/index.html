@@ -42,6 +42,7 @@
           <div id="vf-status" class="vf-status" role="status"></div>
           <button id="resume" class="vf-resume" type="button">Resume</button>
           <button id="zoom" class="vf-zoom" type="button" aria-label="Zoom">1×</button>
+          <button id="share-debug" class="vf-share" type="button" aria-label="Share debug frame">Share frame</button>
           <button id="shutter" class="shutter" type="button" aria-label="Snapshot"></button>
         </div>
         <form id="manual" class="manual" autocomplete="off">
@@ -69,6 +70,10 @@
         <div class="group row">
           <label for="preprocess">TV preprocessing <span class="muted">(invert + threshold)</span></label>
           <input id="preprocess" type="checkbox">
+        </div>
+        <div class="group row">
+          <label for="show-boxes">Show OCR boxes <span class="muted">(what the camera reads)</span></label>
+          <input id="show-boxes" type="checkbox">
         </div>
         <div class="group">
           <h3>Data</h3>

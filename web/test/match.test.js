@@ -80,14 +80,25 @@ test('fuzzy: OCR noise via FTS prefix + Dice ≥ 0.75', () => {
   assert.equal(resolve(tdb, 'The Godfathe').winner.tconst, 'tt0068646');
 });
 
+test('fuzzy tolerates OCR errors at word ends (loose prefix)', () => {
+  assert.equal(resolve(tdb, 'Breaklng Bad').winner.tconst, 'tt0903747');
+  assert.equal(resolve(tdb, 'The Witchar').winner.tconst, 'tt5180504');
+  assert.equal(resolve(tdb, 'Westwor1d', { context: { series: true } }).winner.tconst, 'tt0475784');
+  assert.equal(resolve(tdb, 'The Wltcher').winner.tconst, 'tt5180504'); // mid-word l↔i
+  assert.equal(resolve(tdb, 'Home Aione').winner.tconst, 'tt0099785');
+  assert.equal(resolve(tdb, 'Breaking Bab'), resolve(tdb, 'Breaking Bab')); // deterministic
+  assert.equal(resolve(tdb, 'Home Alcne').winner.tconst, 'tt0099785'); // o↔c
+});
+
 test('fuzzy rejects weak matches', () => {
   assert.equal(resolve(tdb, 'The'), null);
   assert.equal(resolve(tdb, 'Godzilla'), null);
+  assert.equal(resolve(tdb, 'W HA'), null); // no fuzzy below 5 letters
 });
 
 test('stop-list and junk', () => {
   for (const s of ['Continue Watching', 'Weiterschauen', 'Top 10', 'Top 10 in der Schweiz heute', 'Meine Liste',
-    'Play', 'Netflix', 'Staffel 2', 'S1:E3', '1 Std. 52 Min.', '2019', '16+', '3 Staffeln', 'Neue Folgen', 'x',
+    'Play', 'Netflix', 'Staffel 2', 'ed', 'Mo', 'S1:E3', '1 Std. 52 Min.', '2019', '16+', '3 Staffeln', 'Neue Folgen', 'x',
     'Ein junger Mann entdeckt, dass seine Familie ein dunkles Geheimnis hat und muss fliehen']) {
     assert.ok(isStop(normalize(s)), `expected stop: ${s}`);
   }

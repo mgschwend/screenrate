@@ -6,6 +6,7 @@ export class Overlay {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.badges = []; // [{rect:{x,y,w,h} in CSS px, data}]
+    this.debug = null; // {items:[{text, box, confidence}], matched:Set<item>} — raw OCR output, drawn under badges
   }
 
   /** cover (live video, matches object-fit:cover) or contain (frozen frame: show everything). */
@@ -22,12 +23,20 @@ export class Overlay {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  /** Draw a frozen frame (full colour) under the badges. */
-  drawFrame(frame) {
+  /**
+   * Paint the picture under the badges.
+   * frame: a canvas (frozen frame → contain, everything visible) or a live crop
+   * {source: <video>, sx, sy, sw, sh} (→ cover, fills the viewfinder). We paint the video ourselves instead of
+   * relying on <video> CSS (iOS ignored object-fit there), so picture and badges always share one transform.
+   */
+  drawFrame(frame, fit) {
     this.resize();
-    const { s, ox, oy, W, H } = this.transform(frame.width, frame.height, 'contain');
+    const live = !!frame.source;
+    const fw = live ? frame.sw : frame.width, fh = live ? frame.sh : frame.height;
+    const { s, ox, oy, W, H } = this.transform(fw, fh, fit);
     this.ctx.clearRect(0, 0, W, H);
-    this.ctx.drawImage(frame, ox, oy, frame.width * s, frame.height * s);
+    if (live) this.ctx.drawImage(frame.source, frame.sx, frame.sy, frame.sw, frame.sh, ox, oy, fw * s, fh * s);
+    else this.ctx.drawImage(frame, ox, oy, fw * s, fh * s);
   }
 
   clear() {
@@ -42,10 +51,12 @@ export class Overlay {
    * @param frame optional frozen frame to paint first
    */
   render(items, fw, fh, frame) {
-    if (frame) this.drawFrame(frame); else this.clear();
+    const fit = frame && !frame.source ? 'contain' : 'cover';
+    if (frame) this.drawFrame(frame, fit); else this.clear();
     const ctx = this.ctx;
-    const { s, ox, oy, W, H } = this.transform(fw, fh, frame ? 'contain' : 'cover');
+    const { s, ox, oy, W, H } = this.transform(fw, fh, fit);
     this.badges = [];
+    if (this.debug?.items?.length) this.drawDebug(this.debug, s, ox, oy);
     ctx.font = '700 15px -apple-system, system-ui, sans-serif';
     ctx.textBaseline = 'middle';
     for (const it of items) {
@@ -67,6 +78,28 @@ export class Overlay {
       ctx.fillText(text, x + 8, y + h / 2 + 1);
       this.badges.push({ rect: { x: x - 6, y: y - 8, w: w + 12, h: h + 16 }, data: it.data }); // generous hit area
     }
+  }
+
+  /** Outline every OCR line with its text + confidence; matched lines in yellow. */
+  drawDebug({ items, matched }, s, ox, oy) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.font = '500 10px -apple-system, system-ui, sans-serif';
+    ctx.textBaseline = 'bottom';
+    for (const it of items) {
+      const x = ox + it.box.x * s, y = oy + it.box.y * s, w = it.box.width * s, h = it.box.height * s;
+      const hitColor = matched?.has(it);
+      ctx.strokeStyle = hitColor ? 'rgba(245,197,24,.95)' : 'rgba(120,200,255,.8)';
+      ctx.strokeRect(x, y, w, h);
+      const label = `${it.text} ${Math.round(it.confidence * 100)}%`;
+      const tw = ctx.measureText(label).width + 6;
+      ctx.fillStyle = 'rgba(0,0,0,.65)';
+      ctx.fillRect(x, y - 13, tw, 13);
+      ctx.fillStyle = hitColor ? '#f5c518' : '#9fd8ff';
+      ctx.fillText(label, x + 3, y - 1);
+    }
+    ctx.restore();
   }
 
   hit(clientX, clientY) {

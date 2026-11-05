@@ -104,7 +104,7 @@ async function startCamera() {
   if (S.stream) return;
   S.stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
-    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } }, // 4K where available: digital zoom keeps detail
   });
   video.srcObject = S.stream;
   await video.play();
@@ -114,11 +114,32 @@ async function startCamera() {
   await applyZoom(Z.level);
 }
 
+// =============== live view ===============
+/** Centre crop of the current video frame for the digital zoom level (same region grabFrame() OCRs). */
+function liveFrame() {
+  const vw = video.videoWidth, vh = video.videoHeight, z = digitalZoom();
+  const sw = Math.round(vw / z), sh = Math.round(vh / z);
+  return { source: video, sx: (vw - sw) / 2, sy: (vh - sh) / 2, sw, sh };
+}
+
+/** Paint camera + badges on the canvas every animation frame while scanning. */
+function paintLive() {
+  if (S.mode !== 'scanning') return;
+  if (video.videoWidth) {
+    const f = liveFrame();
+    // badges/boxes refer to the last OCR'd crop; if zoom changed since, hide them until the next OCR
+    const same = S.frameSize[0] === f.sw && S.frameSize[1] === f.sh;
+    if (!same) overlay.debug = null;
+    overlay.render(same ? S.badges : [], f.sw, f.sh, f);
+  }
+  requestAnimationFrame(paintLive);
+}
+
 // =============== zoom ===============
 // Camera-native zoom when the track supports it; otherwise digital: the <video> is scaled around its centre
 // and grabFrame() crops the same centre region at native resolution (so OCR gets more pixels per letter).
 const Z = { level: settings.get().zoom || 1, hw: null, pending: null };
-const maxZoom = () => (Z.hw ? Math.min(Z.hw.max, 10) : 5);
+const maxZoom = () => (Z.hw ? Math.min(Z.hw.max, 10) : 4);
 const digitalZoom = () => (Z.hw ? 1 : Z.level);
 
 async function applyZoom(level) {
@@ -128,7 +149,6 @@ async function applyZoom(level) {
       await S.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ zoom: Math.min(Math.max(Z.level, Z.hw.min), Z.hw.max) }] });
     } catch { /* ignore: keep previous zoom */ }
   }
-  video.style.transform = digitalZoom() > 1 ? `scale(${digitalZoom()})` : '';
   $('#zoom').textContent = `${Number.isInteger(Z.level) ? Z.level : Z.level.toFixed(1)}×`;
   S.prevThumb = null; // new view → OCR the next frame even if the thumbnail looks similar
   settings.set({ zoom: Z.level });
@@ -198,8 +218,11 @@ async function startScanning() {
   S.badges = [];
   S.prevThumb = null;
   S.lastMatches = [];
+  S.ocrItems = null;
+  overlay.debug = null;
   S.voter.reset();
   S.floorSince = 0;
+  requestAnimationFrame(paintLive);
   ensureOcr().then(() => loop(++S.loopId));
 }
 
@@ -209,7 +232,7 @@ function pause() {
   S.loopId++;
   setMode('paused');
   stopCamera();
-  status('');
+  showStats();
   requestAnimationFrame(() => overlay.render(S.badges, ...S.frameSize, raw.width ? raw : null));
 }
 
@@ -259,18 +282,25 @@ async function scanFrame({ snapshot, id }) {
 async function ocrRaw({ snapshot, id }) {
   const { preprocess, minConfidence } = settings.get();
   const { canvas, scale } = prepare(raw, { preprocess });
-  const items = await recognize(canvas);
+  $('#vf-status').classList.add('busy');
+  let items;
+  try { items = await recognize(canvas); } finally { $('#vf-status').classList.remove('busy'); }
   if (!snapshot && (S.mode !== 'scanning' || id !== S.loopId)) return; // paused meanwhile
   const scaled = items
     .filter((it) => it.confidence >= minConfidence && it.text.trim())
     .map((it) => ({ ...it, box: { x: it.box.x * scale, y: it.box.y * scale, width: it.box.width * scale, height: it.box.height * scale } }));
   S.frameNo++;
+  S.ocrItems = scaled;
+  S.ocrRawCount = items.length;
+  overlay.debug = settings.get().showBoxes ? { items: scaled, matched: new Set() } : null;
   processOcr(scaled, { snapshot });
-  const ms = ocrState.lastMs != null ? `${ocrState.lastMs} ms` : '';
-  if (!snapshot) status(`${ocrState.backend || ''} ${ms}`.trim());
+  showStats();
 }
 
-function lookup(text, context) {
+const JUNK_RAW = /[★☆✩✭✮]|^\s*[—–-]\s|^\s*[“"„«]/; // review quotes ("★★★★★ — the Guardian"), dashes, quotes
+function lookup(text, context, confidence = 1) {
+  if (JUNK_RAW.test(text)) return null;
+  if (confidence < 0.85 && normalize(text).replace(/ /g, '').length <= 4) return null; // short + unsure = noise
   const key = `${normalize(text)}|${context.year || ''}|${context.series ? 's' : ''}`;
   if (!S.lookups.has(key)) S.lookups.set(key, resolve(tdb, text, { context, remembered: remembered.all() }));
   return S.lookups.get(key);
@@ -279,29 +309,43 @@ function lookup(text, context) {
 function processOcr(items, { snapshot }) {
   const matches = [];
   for (const ph of phrases(items)) {
-    let res = lookup(ph.text, contextFor(ph, items));
-    if (res) { matches.push({ res, box: ph.box, text: ph.text }); continue; }
+    let res = lookup(ph.text, contextFor(ph, items), ph.confidence);
+    if (res) { matches.push({ res, box: ph.box, text: ph.text, parts: ph.parts }); continue; }
     if (ph.parts.length > 1) {
       for (const part of ph.parts) {
-        res = lookup(part.text, contextFor(part, items));
-        if (res) matches.push({ res, box: part.box, text: part.text });
+        res = lookup(part.text, contextFor(part, items), part.confidence);
+        if (res) matches.push({ res, box: part.box, text: part.text, parts: [part] });
       }
     }
   }
+  if (overlay.debug) for (const m of matches) for (const p of m.parts) overlay.debug.matched.add(p);
   S.lastMatches = matches;
   showMatches(matches, { snapshot });
 }
 
 function showMatches(matches, { snapshot }) {
-  if (!snapshot) S.voter.observe(S.frameNo, matches.map((m) => m.res.norm));
-  const shown = snapshot ? matches : matches.filter((m) => S.voter.confirmed(m.res.norm));
+  // Vote on the matched title, not the raw OCR string: noisy OCR ("BreakIng Bad", "Breaking Ba") still agrees.
+  if (!snapshot) S.voter.observe(S.frameNo, matches.map(voteKey));
+  const shown = snapshot ? matches : matches.filter((m) => S.voter.confirmed(voteKey(m)));
+  S.shownCount = shown.length;
 
   S.badges = shown.map((m) => {
     const rowId = recordHistory(m);
     return { box: m.box, ...badgeLabel(m.res), data: { res: m.res, text: m.text, rowId } };
   });
   S.frameSize = [raw.width, raw.height];
-  overlay.render(S.badges, raw.width, raw.height, S.mode === 'paused' || snapshot ? raw : null);
+  if (S.mode === 'paused' || snapshot) overlay.render(S.badges, raw.width, raw.height, raw);
+}
+
+const voteKey = (m) => m.res.winner?.tconst || `?${m.res.candidates[0]?.tconst || m.res.norm}`;
+
+/** "● webgpu · 420 ms · 12 lines · 3 matches · 2 shown" */
+function showStats() {
+  if (!settings.get().showBoxes && S.mode === 'scanning') { status(''); return; }
+  const parts = [ocrState.backend, ocrState.lastMs != null && `${ocrState.lastMs} ms`,
+    S.ocrItems && `${S.ocrItems.length} lines`, S.lastMatches && `${S.lastMatches.length} matches`,
+    S.mode === 'scanning' && `${S.shownCount || 0} shown`].filter(Boolean);
+  status(parts.join(' · '));
 }
 
 function badgeLabel(res) {
@@ -353,6 +397,42 @@ $('#viewfinder').addEventListener('click', (e) => {
 });
 $('#resume').addEventListener('click', (e) => { e.stopPropagation(); startScanning(); });
 
+/** Share the frozen frame with all OCR boxes/texts + matches burnt in (for debugging OCR on real TVs). */
+$('#share-debug').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (!raw.width) return;
+  const pad = 14, lineH = 22;
+  const lines = [
+    `ScreenRate debug · ${new Date().toISOString()} · ${ocrState.backend} ${ocrState.lastMs} ms · zoom ${Z.level}× · preprocess ${settings.get().preprocess}`,
+    ...(S.ocrItems || []).map((it) => `• ${it.text}  (${Math.round(it.confidence * 100)}%)`),
+    ...(S.lastMatches || []).map((m) => `→ "${m.text}" = ${m.res.winner ? `${m.res.winner.title} ${m.res.winner.year} ★${m.res.winner.rating}` : `? (${m.res.candidates.length} candidates)`}`),
+  ];
+  const out = document.createElement('canvas');
+  out.width = Math.max(raw.width, 900);
+  out.height = raw.height + pad * 2 + lines.length * lineH;
+  const g = out.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, out.width, out.height);
+  g.drawImage(raw, 0, 0);
+  g.lineWidth = 2; g.font = '600 16px -apple-system, system-ui, sans-serif'; g.textBaseline = 'bottom';
+  const matched = new Set((S.lastMatches || []).flatMap((m) => m.parts || []));
+  for (const it of S.ocrItems || []) {
+    g.strokeStyle = matched.has(it) ? '#f5c518' : '#5ac8fa';
+    g.strokeRect(it.box.x, it.box.y, it.box.width, it.box.height);
+    g.fillStyle = matched.has(it) ? '#f5c518' : '#5ac8fa';
+    g.fillText(it.text, it.box.x, it.box.y - 2);
+  }
+  g.font = '15px ui-monospace, Menlo, monospace'; g.fillStyle = '#ddd'; g.textBaseline = 'top';
+  lines.forEach((l, i) => g.fillText(l, pad, raw.height + pad + i * lineH));
+  const blob = await new Promise((r) => out.toBlob(r, 'image/jpeg', 0.85));
+  const file = new File([blob], `screenrate-debug-${Date.now()}.jpg`, { type: 'image/jpeg' });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'ScreenRate debug frame' }); } catch { /* cancelled */ }
+  } else {
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: file.name });
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+});
+
 // touching the history list pauses
 $('#history').addEventListener('touchstart', () => pause(), { passive: true });
 $('#history').addEventListener('wheel', () => pause(), { passive: true });
@@ -371,7 +451,7 @@ window.addEventListener('deviceorientation', (e) => {
 
 // Re-draw whenever the viewfinder changes size (pause/resume height transition, rotation).
 new ResizeObserver(() => {
-  if (!S.frameSize[0]) return;
+  if (!S.frameSize[0] || S.mode === 'scanning') return; // live: painter redraws every frame
   overlay.render(S.badges, ...S.frameSize, S.mode === 'paused' ? raw : null);
 }).observe($('#viewfinder'));
 
@@ -442,6 +522,7 @@ function renderSettings() {
   $('#tmdb-key').value = s.tmdbKey;
   $('#fps').value = String(s.fps);
   $('#preprocess').checked = s.preprocess;
+  $('#show-boxes').checked = s.showBoxes;
   if (tdb) {
     const m = tdb.meta();
     const built = m.built_at ? new Date(m.built_at.replace(' ', 'T') + 'Z').toLocaleString('de-CH') : '–';
@@ -459,6 +540,7 @@ function renderSettings() {
 $('#tmdb-key').addEventListener('change', (e) => { settings.set({ tmdbKey: e.target.value.trim() }); posterCache.clear(); toast('Saved'); });
 $('#fps').addEventListener('change', (e) => settings.set({ fps: Number(e.target.value) }));
 $('#preprocess').addEventListener('change', (e) => settings.set({ preprocess: e.target.checked }));
+$('#show-boxes').addEventListener('change', (e) => settings.set({ showBoxes: e.target.checked }));
 $('#clear-remembered').addEventListener('click', () => { remembered.clear(); S.lookups.clear(); renderSettings(); toast('Remembered choices cleared'); });
 $('#clear-history').addEventListener('click', () => {
   history.clear(); S.sessionSeen.clear(); renderHistory(openHistoryRow); renderSettings(); toast('History cleared');
