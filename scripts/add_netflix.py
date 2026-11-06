@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 API = "https://api.themoviedb.org/3"
 MAX_PAGES = 500        # TMDB discover stops at page 500
 WORKERS = 8
+SAMPLE = 15            # unmatched titles named in the log, most popular first
 
 
 def log(msg): print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -56,18 +57,23 @@ def netflix_provider_ids(tmdb, media, region):
     return [p["provider_id"] for p in j.get("results", []) if p["provider_name"].lower().startswith("netflix")]
 
 
-def discover_ids(tmdb, media, region, providers):
+def discover_titles(tmdb, media, region, providers):
+    """{tmdb id: title}, most popular first."""
     params = dict(watch_region=region, with_watch_providers="|".join(map(str, providers)),
                   with_watch_monetization_types="flatrate|ads", sort_by="popularity.desc", page=1)
     first = tmdb.get(f"/discover/{media}", **params)
     pages = min(first.get("total_pages", 1), MAX_PAGES)
-    ids = [r["id"] for r in first.get("results", [])]
+    titles = {}
+    def add(j):
+        for r in (j or {}).get("results", []):
+            titles.setdefault(r["id"], r.get("title") or r.get("name") or "?")
+    add(first)
     with ThreadPoolExecutor(WORKERS) as ex:
         for j in ex.map(lambda p: tmdb.get(f"/discover/{media}", **{**params, "page": p}), range(2, pages + 1)):
-            ids += [r["id"] for r in (j or {}).get("results", [])]
+            add(j)
     if first.get("total_pages", 1) > MAX_PAGES:
         log(f"  ⚠ {media}/{region}: {first['total_pages']} pages, only the first {MAX_PAGES} are reachable")
-    return list(dict.fromkeys(ids))
+    return titles
 
 
 def main():
@@ -101,7 +107,7 @@ def main():
             providers = netflix_provider_ids(tmdb, media, region)
             if not providers:
                 log(f"  {region}/{media}: no Netflix provider listed"); continue
-            ids = discover_ids(tmdb, media, region, providers)
+            ids = discover_titles(tmdb, media, region, providers)
             missing = [i for i in ids if f"{media}:{i}" not in cache]
             log(f"  {region}/{media}: {len(ids):,} on Netflix (providers {providers}), {len(missing):,} new id lookups")
             def lookup(i):
@@ -110,10 +116,18 @@ def main():
             with ThreadPoolExecutor(WORKERS) as ex:
                 for i, imdb in ex.map(lookup, missing):
                     cache[f"{media}:{i}"] = imdb
-            for i in ids:
+            no_imdb, not_local, matched = [], [], 0
+            for i, name in ids.items():
                 imdb = cache.get(f"{media}:{i}", "")
-                if imdb.startswith("tt") and int(imdb[2:]) in known:
-                    found.add(int(imdb[2:]))
+                if not imdb.startswith("tt"):
+                    no_imdb.append(name)
+                elif int(imdb[2:]) in known:
+                    found.add(int(imdb[2:])); matched += 1
+                else:
+                    not_local.append(f"{name} ({imdb})")
+            log(f"  {region}/{media}: {matched:,} matched, {len(no_imdb):,} without IMDb id, {len(not_local):,} not in the local DB")
+            log(f"    most popular without IMDb id: {'; '.join(no_imdb[:SAMPLE]) or '-'}")
+            log(f"    most popular not in the local DB: {'; '.join(not_local[:SAMPLE]) or '-'}")
         con.executemany("INSERT OR IGNORE INTO netflix VALUES (?, ?)", [(region, i) for i in sorted(found)])
         con.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (f"netflix_{region}_count", str(len(found))))
         log(f"  {region}: {len(found):,} Netflix titles matched to the local DB")
