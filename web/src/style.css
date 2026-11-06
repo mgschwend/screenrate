@@ -136,6 +136,15 @@ img.fade { animation: fade .2s ease-out; }
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-weight: 600;
 }
 
+/* touch: every control at least 44 × 44 px; small pills keep their look and grow an invisible hit area */
+button, input, select, .links a { min-height: 44px; }
+.links a { display: flex; align-items: center; justify-content: center; }
+.card { min-height: 0; }
+.imdb, .sheet-handle { position: relative; }
+.imdb::after { content: ""; position: absolute; left: -8px; right: -8px; top: 50%; height: 44px; transform: translateY(-50%); }
+.sheet-handle::after { content: ""; position: absolute; left: -60px; right: -60px; top: 50%; height: 44px; transform: translateY(-50%); }
+.toast button { min-width: 44px; }
+
 /* desktop: centred column, tabs on top, detail as a dialog, strips wrap instead of scrolling sideways */
 @media (min-width: 700px) {
   .app { max-width: 760px; margin-inline: auto; border-inline: 1px solid var(--line); }
