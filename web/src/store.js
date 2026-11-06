@@ -24,7 +24,10 @@ export const account = {
   set: (value) => write(K.account, value),
 };
 
-const SETTINGS_DEFAULTS = { region: 'CH', netflixOnly: false, forYouNetflix: false, withOthers: false };
+const SETTINGS_DEFAULTS = {
+  region: 'CH', netflixOnly: false, forYouNetflix: false, withOthers: false,
+  discover: { mode: 'gems', type: '', genre: '', netflix: true },
+};
 export const settings = {
   get() { return { ...SETTINGS_DEFAULTS, ...read(K.settings, {}) }; },
   set(patch) {

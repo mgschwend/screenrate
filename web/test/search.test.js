@@ -39,7 +39,15 @@ before(async () => {
     CREATE TABLE similar (id INTEGER PRIMARY KEY, others TEXT NOT NULL, why TEXT NOT NULL);
     CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
     INSERT INTO similar VALUES (903747, '15239678', 'd0');
-    INSERT INTO people VALUES (0, 'Vince Gilligan');`);
+    INSERT INTO people VALUES (0, 'Vince Gilligan');
+    ALTER TABLE titles ADD COLUMN genres TEXT DEFAULT '';
+    UPDATE titles SET genres = 'Crime,Drama' WHERE tconst IN ('tt0903747', 'tt0068646');
+    UPDATE titles SET genres = 'Action,Adventure' WHERE tconst = 'tt15239678';
+    INSERT INTO titles (tconst, type, title, originalTitle, year, rating, votes, normTitle, normOriginal, genres) VALUES
+      ('tt8000001', 'movie', 'Qqq Gem', 'Qqq Gem', 2025, 8.1, 80000, 'qqq gem', 'qqq gem', 'Drama'),
+      ('tt8000002', 'movie', 'Qqq Quiet', 'Qqq Quiet', 2001, 7.9, 9000, 'qqq quiet', 'qqq quiet', 'Action'),
+      ('tt8000003', 'movie', 'Qqq Obscure', 'Qqq Obscure', 2001, 8.9, 3000, 'qqq obscure', 'qqq obscure', 'Action');
+    INSERT INTO netflix VALUES ('XX', 8000001);`);
   tdb = new TitleDb(db);
 });
 
@@ -75,6 +83,18 @@ test('typo fallback', () => {
 test('too short / nonsense', () => {
   assert.deepEqual(ids('d'), []);
   assert.deepEqual(ids('zzzzqq'), []);
+});
+
+test('Discover: modes, filters and Netflix', () => {
+  const ids2 = (o) => tdb.discover({ year: 2026, ...o }).map((t) => t.tconst);
+  assert.deepEqual(ids2({ mode: 'gems' }), ['tt8000001', 'tt8000002']); // not too famous, not too obscure
+  assert.deepEqual(ids2({ mode: 'gems', region: 'XX' }), ['tt8000001']);
+  assert.equal(ids2({ mode: 'top' })[0], 'tt0903747');
+  assert.deepEqual(ids2({ mode: 'top', type: 'series' }), ['tt0903747']);
+  assert.deepEqual(ids2({ mode: 'top', genre: 'Crime', type: 'film' }), ['tt0068646']);
+  assert.ok(!ids2({ mode: 'top', genre: 'Drama' }).includes('tt1160419'));
+  assert.deepEqual(ids2({ mode: 'new' }), ['tt8000001']);
+  assert.deepEqual(tdb.genres(), ['Action', 'Adventure', 'Crime', 'Drama']);
 });
 
 test('Netflix availability per region', () => {

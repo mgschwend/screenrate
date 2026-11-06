@@ -58,6 +58,27 @@
         <p id="foryou-empty" class="empty" hidden></p>
       </section>
 
+      <section id="view-discover" class="view" hidden>
+        <h2 class="view-title">Discover</h2>
+        <div class="discover-bar">
+          <div class="discover-row" id="dc-modes" role="group" aria-label="What to show">
+            <button type="button" class="chip" data-mode="gems">Hidden gems</button>
+            <button type="button" class="chip" data-mode="top">Top rated</button>
+            <button type="button" class="chip" data-mode="new">New</button>
+          </div>
+          <div class="discover-row">
+            <select id="dc-type" aria-label="Type">
+              <option value="">Films + series</option><option value="film">Films</option><option value="series">Series</option>
+            </select>
+            <select id="dc-genre" aria-label="Genre"></select>
+            <button id="dc-netflix" type="button" class="chip" aria-pressed="false" hidden><span class="nf">N</span>Netflix</button>
+          </div>
+        </div>
+        <h3 id="dc-head" class="list-head"></h3>
+        <ol id="discover" class="list results"></ol>
+        <p id="discover-empty" class="empty" hidden></p>
+      </section>
+
       <section id="view-watchlist" class="view" hidden>
         <h2 class="view-title">Watchlist</h2>
         <ol id="watchlist" class="list results"></ol>
@@ -94,6 +115,7 @@
     <nav class="tabs" aria-label="Sections">
       <button type="button" data-view="search" class="active">Search</button>
       <button type="button" data-view="foryou">For you</button>
+      <button type="button" data-view="discover">Discover</button>
       <button type="button" data-view="watchlist">Watchlist</button>
       <button type="button" data-view="settings">Settings</button>
     </nav>

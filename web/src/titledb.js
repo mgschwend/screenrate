@@ -137,6 +137,37 @@ export class TitleDb {
     return this.db.selectObjects(`SELECT ${COLS} FROM titles t ORDER BY t.votes DESC LIMIT ?`, [limit]).map(plain);
   }
 
+  /** Every genre in the database, A to Z. */
+  genres() {
+    try {
+      const seen = new Set();
+      for (const list of this.db.selectValues("SELECT DISTINCT genres FROM titles WHERE genres != ''")) {
+        for (const g of list.split(',')) seen.add(g);
+      }
+      return [...seen].sort();
+    } catch { return []; }
+  }
+
+  /**
+   * Browse by quality rather than by name.
+   * mode: 'gems' well rated but little known | 'top' best rated with many votes | 'new' recent and good
+   * type: '' | 'film' | 'series'; genre: '' or an IMDb genre; region: only titles on Netflix there
+   * Best first, by rating; `year` is passed in so "recent" is testable.
+   */
+  discover({ mode = 'gems', type = '', genre = '', region = null, limit = 300, year = new Date().getFullYear() } = {}) {
+    const where = [], args = [];
+    if (region) args.push(region);
+    if (mode === 'gems') where.push('t.rating >= 7.5', 't.votes BETWEEN 5000 AND 100000');
+    if (mode === 'top') where.push('t.votes >= 50000');
+    if (mode === 'new') { where.push('t.year >= ?', 't.rating >= 6.8', 't.votes >= 2000'); args.push(year - 2); }
+    if (type === 'film') where.push("t.type = 'movie'");
+    if (type === 'series') where.push("t.type != 'movie'");
+    if (genre) { where.push("(',' || t.genres || ',') LIKE ?"); args.push(`%,${genre},%`); }
+    const join = region ? "JOIN netflix n ON t.tconst = 'tt' || printf('%07d', n.id) AND n.region = ?" : '';
+    return this.db.selectObjects(`SELECT ${COLS} FROM titles t ${join} WHERE ${where.join(' AND ')}
+      ORDER BY t.rating DESC, t.votes DESC LIMIT ?`, [...args, limit]).map(plain);
+  }
+
   /** Most-voted titles on Netflix in `region`, for browsing without a search term. */
   netflixTop(region, limit = 50) {
     try {

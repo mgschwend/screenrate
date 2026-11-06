@@ -29,11 +29,12 @@ export function toast(msg, action) {
 
 // ---------- result rows (search results, recently opened, watchlist) ----------
 function rowHtml(t) {
-  const sub = [t.year, typeLabel(t.type)].filter(Boolean).join(' · ');
-  return `<div class="t"><b>${t.netflix ? '<span class="nf" title="On Netflix">N</span>' : ''}${esc(t.title)}</b>
+  const sub = [t.year, typeLabel(t.type), t.votes ? `${fmtVotes(t.votes)} votes` : ''].filter(Boolean).join(' · ');
+  return `<span class="nf-slot">${t.netflix ? '<span class="nf" title="On Netflix">N</span>' : ''}</span>
+    <div class="t"><b>${esc(t.title)}</b>
       <small>${esc(sub)}${t.mine ? ` · <span class="mine">You ${t.mine}</span>` : ''}${t.akaTitle ? ` · <i>${esc(t.akaTitle)}</i>` : ''}</small>
       ${t.why ? `<small class="why">${esc(t.why)}</small>` : ''}</div>
-    <div class="r"><span class="rating">★ ${fmtRating(t.rating)}</span>${t.votes ? `<small>${fmtVotes(t.votes)}</small>` : ''}</div>
+    <span class="rating">★ ${fmtRating(t.rating)}</span>
     <a class="imdb" href="${imdbUrl(t.tconst)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(t.title)} on IMDb">IMDb</a>`;
 }
 

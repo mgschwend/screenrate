@@ -72,8 +72,9 @@ progress { width: 100%; accent-color: var(--accent); }
 .list li .t b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list li .t small { color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list li .t small i { font-style: normal; color: #b8b8bd; }
-.list li .r { display: flex; flex-direction: column; align-items: flex-end; gap: .15rem; flex: none; }
-.list li .r small { color: var(--muted); font-size: .72rem; }
+.list li .nf-slot { flex: none; width: 1.15rem; display: flex; justify-content: center; }
+.list li .nf-slot .nf { margin: 0; }
+.list li .rating { flex: none; width: 3.6rem; text-align: center; font-variant-numeric: tabular-nums; }
 .rating { font-weight: 700; color: #000; background: var(--accent); border-radius: 6px; padding: .1rem .4rem; font-size: .85rem; white-space: nowrap; }
 .imdb {
   flex: none; font-size: .72rem; font-weight: 800; color: #000; background: #e6e6e6; text-decoration: none;
@@ -152,7 +153,7 @@ button, input, select, .links a { min-height: 44px; }
   .app { max-width: 760px; margin-inline: auto; border-inline: 1px solid var(--line); }
   .tabs { order: -1; height: 48px; padding: 0 .5rem 0 1rem; border-top: 0; border-bottom: 1px solid var(--line); align-items: stretch; }
   .tabs::before { content: "ScreenRate"; align-self: center; margin-right: auto; font-weight: 700; color: var(--fg); }
-  .tabs button { flex: none; padding: 0 1rem; }
+  .tabs button { flex: none; padding: 0 .9rem; }
   .searchbar { padding-top: .7rem; }
   .view-title { padding-top: .9rem; }
   .sheet { display: grid; place-items: center; }
@@ -222,6 +223,14 @@ button, input, select, .links a { min-height: 44px; }
 .foryou-bar { display: flex; flex-wrap: wrap; gap: .5rem; padding: 0 1rem .6rem; flex: none; border-bottom: 1px solid var(--line); }
 .foryou-bar #quick-rate { flex: 1 1 100%; }
 .chip.on { background: var(--bg3); }
+
+/* discover */
+.discover-bar { padding: 0 1rem .6rem; flex: none; display: flex; flex-direction: column; gap: .5rem; border-bottom: 1px solid var(--line); }
+.discover-row { display: flex; gap: .5rem; }
+.discover-row .chip { flex: 1; justify-content: center; }
+.discover-row select {
+  flex: 1; min-width: 0; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 0 .5rem; font-size: 16px;
+}
 
 /* quick rating */
 .quick {

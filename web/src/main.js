@@ -97,6 +97,7 @@ async function syncAccount() {
     if (!$('#view-search').hidden) showResults();
     if (!$('#view-watchlist').hidden) renderWatchlist(openTitle, rowsFor);
     if (!$('#view-foryou').hidden) renderForYou();
+    if (!$('#view-discover').hidden) renderDiscover();
   } catch (err) {
     if (err instanceof LoginRequired) showLogin('Please log in again.');
   }
@@ -117,6 +118,7 @@ function showView(name) {
   if (name === 'watchlist') renderWatchlist(openTitle, rowsFor);
   if (name === 'settings') renderSettings();
   if (name === 'foryou') renderForYou();
+  if (name === 'discover') renderDiscover();
 }
 for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => showView(b.dataset.view));
 
@@ -184,9 +186,49 @@ function openTitle(t) {
       if (!$('#view-search').hidden && !q.value.trim()) showResults();
       if (!$('#view-watchlist').hidden) renderWatchlist(openTitle, rowsFor);
       if (!$('#view-foryou').hidden) renderForYou();
+      if (!$('#view-discover').hidden) renderDiscover();
     },
   });
 }
+
+// =============== discover ===============
+const DISCOVER_SHOWN = 60;
+const MODE_LABEL = { gems: 'Hidden gems', top: 'Top rated', new: 'New' };
+
+function renderDiscover() {
+  const d = settings.get().discover;
+  const genreSel = $('#dc-genre');
+  if (!genreSel.options.length) {
+    genreSel.innerHTML = `<option value="">All genres</option>${tdb.genres().map((g) => `<option>${g}</option>`).join('')}`;
+  }
+  genreSel.value = d.genre;
+  $('#dc-type').value = d.type;
+  for (const b of document.querySelectorAll('#dc-modes .chip')) {
+    b.classList.toggle('on', b.dataset.mode === d.mode);
+    b.setAttribute('aria-pressed', String(b.dataset.mode === d.mode));
+  }
+  const nf = !!netflixRegion && d.netflix;
+  const nfBtn = $('#dc-netflix');
+  nfBtn.hidden = !netflixRegion;
+  nfBtn.classList.toggle('on', nf);
+  nfBtn.setAttribute('aria-pressed', String(nf));
+
+  const rated = ratings.all();
+  const rows = tdb.discover({ mode: d.mode, type: d.type, genre: d.genre, region: nf ? netflixRegion : null })
+    .filter((t) => !rated[t.tconst]).slice(0, DISCOVER_SHOWN).map(mark);
+  $('#dc-head').textContent = `${MODE_LABEL[d.mode]}${nf ? ` on Netflix ${netflixRegion}` : ''}`;
+  renderRows($('#discover'), rows, openTitle);
+  $('#discover').scrollTop = 0;
+  const empty = $('#discover-empty');
+  empty.hidden = rows.length > 0;
+  empty.textContent = 'Nothing matches. Try another genre, or turn off Netflix.';
+}
+
+const setDiscover = (patch) => { settings.set({ discover: { ...settings.get().discover, ...patch } }); renderDiscover(); };
+$('#dc-modes').addEventListener('click', (e) => { const m = e.target.closest('[data-mode]')?.dataset.mode; if (m) setDiscover({ mode: m }); });
+$('#dc-type').addEventListener('change', (e) => setDiscover({ type: e.target.value }));
+$('#dc-genre').addEventListener('change', (e) => setDiscover({ genre: e.target.value }));
+$('#dc-netflix').addEventListener('click', () => setDiscover({ netflix: !settings.get().discover.netflix }));
 
 // =============== for you ===============
 const FOR_YOU_SHOWN = 40;
