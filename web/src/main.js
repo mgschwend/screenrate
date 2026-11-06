@@ -74,6 +74,7 @@ function startApp() {
   showResults();
   renderSettings();
   checkForNewData();
+  if (matchMedia('(hover: hover) and (min-width: 700px)').matches) $('#q').focus();
 }
 
 /** CI publishes db-version.json next to the DB; re-download quietly when it differs from the cached DB. */

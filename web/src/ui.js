@@ -1,5 +1,5 @@
 // DOM rendering: result rows, watchlist, detail sheet with similar titles, toast.
-import { watchlist } from './store.js';
+import { watchlist, settings } from './store.js';
 import { posterFor } from './tmdb.js';
 
 export const $ = (sel, root = document) => root.querySelector(sel);
@@ -41,9 +41,11 @@ export function renderRows(ol, rows, onOpen) {
 
 function rowLi(t, onOpen) {
   const li = document.createElement('li');
+  li.tabIndex = 0;
   li.innerHTML = rowHtml(t);
   li.querySelector('.imdb').addEventListener('click', (e) => e.stopPropagation());
   li.addEventListener('click', () => onOpen(t));
+  li.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === li) onOpen(t); });
   return li;
 }
 
@@ -55,7 +57,9 @@ export function renderWatchlist(onOpen) {
   $('#watchlist-empty').hidden = rows.length > 0;
   for (const w of rows) {
     const li = document.createElement('li');
+    li.tabIndex = 0;
     li.innerHTML = rowHtml(markNetflix(w));
+    li.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === li) onOpen(w); });
     attachRemoveGestures(li, () => {
       watchlist.remove(w.tconst);
       renderWatchlist(onOpen);
@@ -119,20 +123,39 @@ function cardHtml(c) {
     <span><b>${esc(c.title)}</b>${esc(c.year ?? '')} · ★ ${fmtRating(c.rating)}</span></button>`;
 }
 
+/**
+ * Posters paint over a fixed-size frame, so nothing moves when they arrive. With a key the frame stays
+ * blank until the answer is in (the title only shows when there is no poster); an image is added once
+ * decoded, and fades in only if it had to be fetched.
+ */
 function fillPosters(root) {
+  const hasKey = !!settings.get().tmdbKey;
   for (const el of root.querySelectorAll('[data-poster]')) {
-    posterFor(el.dataset.poster).then((url) => {
-      if (!url || !el.isConnected) return;
+    if (!hasKey || el.dataset.filled) continue;
+    el.dataset.filled = '1';
+    el.classList.add('pending');
+    const started = performance.now();
+    const show = async (url) => {
+      if (!url) return;
       const img = new Image();
-      img.className = el.className; img.alt = ''; img.src = url; img.referrerPolicy = 'no-referrer';
-      img.onload = () => el.replaceWith(img);
-    });
+      img.alt = ''; img.referrerPolicy = 'no-referrer'; img.src = url;
+      await img.decode();
+      if (performance.now() - started > 80) img.classList.add('fade');
+      el.append(img);
+    };
+    posterFor(el.dataset.poster).then(show).catch(() => {}).finally(() => el.classList.remove('pending'));
   }
 }
 
 function stripSection(id, heading, rows) {
   return `<section id="${id}" ${rows.length ? '' : 'hidden'}><h3>${esc(heading)}</h3>
     <div class="strip">${rows.map(cardHtml).join('')}</div></section>`;
+}
+
+/** Same footprint as a loaded strip, so Similar doesn't jump when recommendations arrive. */
+function stripSkeleton(id, heading) {
+  const card = '<div class="card skel" aria-hidden="true"><div class="poster"></div><span><b></b></span></div>';
+  return `<section id="${id}"><h3>${esc(heading)}</h3><div class="strip">${card.repeat(5)}</div></section>`;
 }
 
 /**
@@ -145,10 +168,13 @@ function stripSection(id, heading, rows) {
  * Netflix line: precomputed status (weekly) replaced by the live TMDB check when it resolves.
  * netflix = {region, on: boolean|null, asOf}  — on=null → no precomputed data for this region
  */
-function netflixHtml(netflix) {
-  if (!netflix || netflix.on == null) return '';
-  return `<p class="avail ${netflix.on ? 'yes' : 'no'}">${netflix.on ? '<span class="nf">N</span> On Netflix' : 'Not on Netflix'}
-    (${esc(netflix.region)})<small> · as of ${esc(netflix.asOf || '–')}</small></p><p class="jw">Streaming data: JustWatch (via TMDB)</p>`;
+function netflixHtml(netflix, live) {
+  const status = !netflix || netflix.on == null ? (live ? `<p class="avail no">Netflix (${esc(netflix?.region || '')})</p>` : '')
+    : `<p class="avail ${netflix.on ? 'yes' : 'no'}">${netflix.on ? '<span class="nf">N</span> On Netflix' : 'Not on Netflix'}
+    (${esc(netflix.region)})<small> · as of ${esc(netflix.asOf || '–')}</small></p>`;
+  if (!status) return '';
+  return `${status}${live ? '<p class="streams muted" id="streams-note">Checking streaming services…</p>' : ''}
+    <p class="jw">Streaming data: JustWatch (via TMDB)</p>`;
 }
 
 let markNetflix = (t) => t;
@@ -159,6 +185,7 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
   sheetOnClose = onClose || null;
   const body = $('#sheet-body');
   const inWl = watchlist.has(title.tconst);
+  const live = !!settings.get().tmdbKey;
   const sub = [title.year, typeLabel(title.type),
     title.originalTitle && title.originalTitle !== title.title ? `“${title.originalTitle}”` : ''].filter(Boolean).join(' · ');
   body.innerHTML = `
@@ -172,9 +199,9 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
       <a href="${imdbUrl(title.tconst)}" target="_blank" rel="noopener noreferrer">IMDb</a>
       <a href="https://letterboxd.com/imdb/${esc(title.tconst)}/" target="_blank" rel="noopener noreferrer">Letterboxd</a>
     </div>
-    <div id="avail">${netflixHtml(netflix)}</div>
+    <div id="avail">${netflixHtml(netflix, live)}</div>
     <button type="button" class="wl-btn ${inWl ? 'on' : ''}">${inWl ? '✓ On watchlist' : '+ Add to watchlist'}</button>
-    ${stripSection('recs', 'Recommended (TMDB)', [])}
+    ${live ? stripSkeleton('recs', 'Recommended (TMDB)') : ''}
     ${stripSection('similar', 'Similar', similar)}`;
 
   const btn = body.querySelector('.wl-btn');
@@ -193,7 +220,8 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
 
   providers?.then((p) => {
     const box = body.querySelector('#avail');
-    if (!p || !box?.isConnected || $('#sheet-title')?.textContent !== title.title) return;
+    if (!box?.isConnected) return;
+    if (!p) { const note = box.querySelector('#streams-note'); if (note) note.textContent = 'No live streaming data for this title.'; return; }
     const list = p.flatrate.length ? p.flatrate.map(esc).join(', ') : 'no subscription service';
     box.innerHTML = `<p class="avail ${p.netflix ? 'yes' : 'no'}">${p.netflix ? '<span class="nf">N</span> On Netflix' : 'Not on Netflix'} (${esc(netflix?.region || '')}) <small>· live</small></p>
       <p class="streams">Streaming in ${esc(netflix?.region || '')}: ${p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener noreferrer">${list}</a>` : list}</p>
@@ -202,7 +230,8 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
 
   recommend?.then((rows) => {
     const sec = body.querySelector('#recs');
-    if (!rows.length || !sec?.isConnected || $('#sheet-title')?.textContent !== title.title) return;
+    if (!sec?.isConnected) return;
+    if (!rows.length) { sec.remove(); return; }
     sec.outerHTML = stripSection('recs', 'Recommended (TMDB)', rows.map(markNetflix));
     wireCards(body.querySelector('#recs'));
   });
