@@ -6,7 +6,7 @@ import { recommendationsFor, providersFor } from './tmdb.js';
 import { $, toast, renderRows, renderWatchlist, openSheet, closeSheet, setNetflixMarker } from './ui.js';
 
 let tdb = null;
-let netflix = new Set();   // tconsts on Netflix in the chosen region (precomputed weekly)
+let netflix = new Set();   // tconsts on Netflix in the chosen region (precomputed nightly)
 let netflixRegion = null;  // null → no Netflix data in this DB for the chosen region
 
 function loadNetflix() {

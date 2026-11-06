@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '17 4 * * 1' # weekly, Monday 04:17 UTC (IMDb datasets refresh daily)
+    - cron: '17 2 * * *' # nightly, 02:17 UTC (IMDb datasets refresh daily)
   workflow_dispatch:
 
 permissions:

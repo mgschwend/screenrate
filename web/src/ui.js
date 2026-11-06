@@ -159,7 +159,7 @@ let relatedNetflixOnly = false; // kept while moving from title to title
  * @param onOpen    open another title (a tapped card)
  */
 /**
- * Netflix line: precomputed status (weekly) replaced by the live TMDB check when it resolves.
+ * Netflix line: precomputed status (nightly) replaced by the live TMDB check when it resolves.
  * netflix = {region, on: boolean|null, asOf}  — on=null → no precomputed data for this region
  */
 function netflixHtml(netflix, live) {

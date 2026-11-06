@@ -10,7 +10,7 @@ Format (mirrored in web/src/dbcrypto.js):
   bytes 17-   AES-256-GCM( gzip(sqlite) ), 16-byte tag appended; AAD = bytes 0-4
 Key = PBKDF2-HMAC-SHA256(passphrase, SALT, ITERATIONS, 32 bytes).
 The salt is fixed so the app can derive the key once and reuse it across
-weekly rebuilds; the IV is fresh per file.
+nightly rebuilds; the IV is fresh per file.
 
 Usage:  DB_PASSPHRASE=… python encrypt_db.py imdb.sqlite imdb.sqlite.enc
         DB_PASSPHRASE=… python encrypt_db.py --decrypt imdb.sqlite.enc out.sqlite
