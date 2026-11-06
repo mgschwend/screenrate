@@ -15,7 +15,9 @@ function loadNetflix() {
   netflixRegion = regions.includes(region) ? region : regions[0] || null;
   netflix = netflixRegion ? tdb.netflixSet(netflixRegion) : new Set();
   $('#nf-only').hidden = !netflixRegion;
-  $('#nf-only').classList.toggle('on', !!netflixRegion && settings.get().netflixOnly);
+  const nfOn = !!netflixRegion && settings.get().netflixOnly;
+  $('#nf-only').classList.toggle('on', nfOn);
+  $('#nf-only').setAttribute('aria-pressed', String(nfOn));
   $('#nf-only').textContent = netflixRegion ? `N ${netflixRegion}` : 'N';
 }
 const mark = (t) => ({ ...t, netflix: netflix.has(t.tconst) });
@@ -102,6 +104,14 @@ $('#search-form').addEventListener('submit', (e) => { e.preventDefault(); q.blur
 function showResults() {
   const text = q.value.trim();
   const list = $('#results'), empty = $('#results-empty');
+  const nfOnly = !!netflixRegion && settings.get().netflixOnly;
+  if (text.replace(/\s/g, '').length < MIN_CHARS && nfOnly) {
+    $('#list-head').hidden = false;
+    $('#list-head').textContent = `Most popular on Netflix ${netflixRegion}`;
+    renderRows(list, tdb.netflixTop(netflixRegion).map(mark), openTitle);
+    empty.hidden = true;
+    return;
+  }
   if (text.replace(/\s/g, '').length < MIN_CHARS) {
     const recent = history.all().reverse();
     $('#list-head').textContent = 'Recently opened';
@@ -111,7 +121,6 @@ function showResults() {
     empty.textContent = 'Type a film or series title — results appear as you type.';
     return;
   }
-  const nfOnly = !!netflixRegion && settings.get().netflixOnly;
   let rows = searchTitles(tdb, text, nfOnly ? 300 : 30).map(mark);
   if (nfOnly) rows = rows.filter((r) => r.netflix).slice(0, 30);
   $('#list-head').hidden = false;

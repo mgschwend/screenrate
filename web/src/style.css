@@ -119,7 +119,20 @@ progress { width: 100%; accent-color: var(--accent); }
   place-items: center; text-align: center; font-size: .8rem; color: var(--muted); padding: .4rem; overflow: hidden;
 }
 .card span { display: block; font-size: .78rem; margin-top: .3rem; line-height: 1.3; }
-.card span b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.card span b {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-weight: 600;
+}
+
+/* wide screens: keep the phone-sized column, centred */
+@media (min-width: 700px) {
+  .app { max-width: 640px; margin-inline: auto; border-inline: 1px solid var(--line); }
+  .sheet-panel { max-width: 640px; margin-inline: auto; }
+  .sheet-backdrop { cursor: pointer; }
+}
+@media (hover: hover) {
+  .list li:hover { background: var(--bg2); }
+  .card:hover .poster { outline: 2px solid var(--accent); outline-offset: -2px; }
+}
 
 /* toast */
 .toast {

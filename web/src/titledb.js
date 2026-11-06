@@ -96,6 +96,15 @@ export class TitleDb {
     } catch { return new Set(); }
   }
 
+  /** Most-voted titles on Netflix in `region`, for browsing without a search term. */
+  netflixTop(region, limit = 50) {
+    try {
+      return this.db.selectObjects(
+        `SELECT ${COLS} FROM netflix n JOIN titles t ON t.tconst = 'tt' || printf('%07d', n.id)
+           WHERE n.region = ? ORDER BY t.votes DESC LIMIT ?`, [region, limit]).map(plain);
+    } catch { return []; }
+  }
+
   hasSimilar() {
     try { return !!this.db.selectValue("SELECT 1 FROM sqlite_master WHERE name = 'similar'"); } catch { return false; }
   }

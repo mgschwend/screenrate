@@ -80,4 +80,9 @@ test('Netflix availability per region', () => {
   assert.ok(ch.has('tt15239678'));  // 8-digit id
   assert.ok(!ch.has('tt1160419'));
   assert.equal(tdb.netflixSet('DE').size, 0);
+  const top = tdb.netflixTop('CH');
+  assert.equal(top.length, 2);
+  assert.ok(top.every((t) => ch.has(t.tconst)));
+  assert.ok(top[0].votes >= top[1].votes);
+  assert.deepEqual(tdb.netflixTop('DE'), []);
 });

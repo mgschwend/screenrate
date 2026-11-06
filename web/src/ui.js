@@ -55,7 +55,7 @@ export function renderWatchlist(onOpen) {
   $('#watchlist-empty').hidden = rows.length > 0;
   for (const w of rows) {
     const li = document.createElement('li');
-    li.innerHTML = rowHtml(w);
+    li.innerHTML = rowHtml(markNetflix(w));
     attachRemoveGestures(li, () => {
       watchlist.remove(w.tconst);
       renderWatchlist(onOpen);
@@ -103,6 +103,7 @@ function setupSheetOnce() {
   if (setupSheetOnce.done) return;
   setupSheetOnce.done = true;
   $('#sheet').addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeSheet(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#sheet').hidden) closeSheet(); });
   const panel = $('.sheet-panel');
   let y0 = null;
   panel.addEventListener('touchstart', (e) => { y0 = panel.scrollTop <= 0 ? e.touches[0].clientY : null; }, { passive: true });
