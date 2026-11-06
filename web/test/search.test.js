@@ -46,7 +46,11 @@ before(async () => {
     INSERT INTO titles (tconst, type, title, originalTitle, year, rating, votes, normTitle, normOriginal, genres) VALUES
       ('tt8000001', 'movie', 'Qqq Gem', 'Qqq Gem', 2025, 8.1, 80000, 'qqq gem', 'qqq gem', 'Drama'),
       ('tt8000002', 'movie', 'Qqq Quiet', 'Qqq Quiet', 2001, 7.9, 9000, 'qqq quiet', 'qqq quiet', 'Action'),
-      ('tt8000003', 'movie', 'Qqq Obscure', 'Qqq Obscure', 2001, 8.9, 3000, 'qqq obscure', 'qqq obscure', 'Action');
+      ('tt8000003', 'movie', 'Qqq Obscure', 'Qqq Obscure', 2001, 8.9, 3000, 'qqq obscure', 'qqq obscure', 'Action'),
+      ('tt8000004', 'movie', 'Qqq Solid', 'Qqq Solid', 2001, 7.9, 150000, 'qqq solid', 'qqq solid', 'Action'),
+      ('tt8000005', 'movie', 'Qqq Toon', 'Qqq Toon', 2001, 8.5, 90000, 'qqq toon', 'qqq toon', 'Animation');
+    CREATE TABLE title_people (id INTEGER PRIMARY KEY, people TEXT NOT NULL);
+    INSERT INTO title_people VALUES (903747, 'd0,a1'); INSERT INTO people VALUES (1, 'Bryan Cranston');
     INSERT INTO netflix VALUES ('XX', 8000001);`);
   tdb = new TitleDb(db);
 });
@@ -87,14 +91,39 @@ test('too short / nonsense', () => {
 
 test('Discover: modes, filters and Netflix', () => {
   const ids2 = (o) => tdb.discover({ year: 2026, ...o }).map((t) => t.tconst);
-  assert.deepEqual(ids2({ mode: 'gems' }), ['tt8000001', 'tt8000002']); // not too famous, not too obscure
+  assert.deepEqual(ids2({ mode: 'gems' }), ['tt8000001', 'tt8000004']); // not too famous, not too obscure
   assert.deepEqual(ids2({ mode: 'gems', region: 'XX' }), ['tt8000001']);
+  assert.deepEqual(ids2({ mode: 'gems', genre: 'Animation' }), ['tt8000005']); // left out unless asked for
   assert.equal(ids2({ mode: 'top' })[0], 'tt0903747');
   assert.deepEqual(ids2({ mode: 'top', type: 'series' }), ['tt0903747']);
   assert.deepEqual(ids2({ mode: 'top', genre: 'Crime', type: 'film' }), ['tt0068646']);
   assert.ok(!ids2({ mode: 'top', genre: 'Drama' }).includes('tt1160419'));
   assert.deepEqual(ids2({ mode: 'new' }), ['tt15239678', 'tt8000001']); // 2024 and 2025, best first
-  assert.deepEqual(tdb.genres(), ['Action', 'Adventure', 'Crime', 'Drama']);
+  assert.deepEqual(tdb.genres(), ['Action', 'Adventure', 'Animation', 'Crime', 'Drama']);
+});
+
+test('rating context picks a big enough genre', () => {
+  assert.equal(tdb.ratingContext('tt0903747'), null); // no genre reaches 100 titles here
+  assert.deepEqual(tdb.ratingContext('tt0903747', 1), { pct: 100, genre: 'Crime', kind: 'series' });
+  assert.deepEqual(tdb.ratingContext('tt0068646', 1), { pct: 50, genre: 'Drama', kind: 'films' }); // its better genre
+  assert.equal(tdb.ratingContext('tt0000001', 1), null);
+});
+
+test('credits for the taste profile', () => {
+  const [row] = tdb.tasteRows(['tt0903747', 'tt0000001']);
+  assert.deepEqual(row.people, [{ role: 'd', name: 'Vince Gilligan' }, { role: 'a', name: 'Bryan Cranston' }]);
+  assert.deepEqual(row.genres, ['Crime', 'Drama']);
+});
+
+test('a wide search looks past the usual top matches', () => {
+  const limits = [];
+  const fake = { exact: () => [], akaPrefix: (_, n) => { limits.push(n); return []; }, akaContains: (_, n) => { limits.push(n); return []; },
+    prefix: (_, n) => { limits.push(n); return []; } };
+  searchTitles(fake, 'the');
+  assert.deepEqual(limits, [40, 80, 30]);
+  limits.length = 0;
+  searchTitles(fake, 'the', 5000, { wide: true });
+  assert.deepEqual(limits, [5000, 5000, 5000]);
 });
 
 test('Netflix availability per region', () => {

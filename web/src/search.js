@@ -3,6 +3,7 @@ import { normalize } from './normalize.js';
 import { dice } from './match.js';
 
 export const MIN_CHARS = 2;
+const WIDE_REACH = 5000;
 
 /**
  * Ranked results for a typed query:
@@ -13,7 +14,9 @@ export const MIN_CHARS = 2;
  * Within a group: most IMDb votes first.
  * @returns [{tconst, title, year, type, rating, votes, originalTitle, akaTitle?}] — akaTitle only when it differs
  */
-export function searchTitles(tdb, query, limit = 30) {
+export function searchTitles(tdb, query, limit = 30, { wide = false } = {}) {
+  // `wide` looks far past the usual top matches, for callers that filter the results afterwards
+  const reach = (n) => (wide ? WIDE_REACH : n);
   const norm = normalize(query);
   if (norm.replace(/ /g, '').length < MIN_CHARS) return [];
 
@@ -29,9 +32,9 @@ export function searchTitles(tdb, query, limit = 30) {
   const starts = (r) => r.normTitle.startsWith(norm) || (r.normOriginal || '').startsWith(norm);
 
   add(tdb.exact(norm), () => 0);
-  add(tdb.akaPrefix(norm, 40), (r) => (normalize(r.akaTitle) === norm ? 0 : 1));
-  add(tdb.prefix(norm, 80), (r) => (r.normTitle === norm || r.normOriginal === norm ? 0 : starts(r) ? 1 : 2));
-  add(tdb.akaContains(norm, 30), () => 2);
+  add(tdb.akaPrefix(norm, reach(40)), (r) => (normalize(r.akaTitle) === norm ? 0 : 1));
+  add(tdb.prefix(norm, reach(80)), (r) => (r.normTitle === norm || r.normOriginal === norm ? 0 : starts(r) ? 1 : 2));
+  add(tdb.akaContains(norm, reach(30)), () => 2);
 
   if (!best.size && norm.replace(/ /g, '').length >= 4) {
     // typos: widen word prefixes ("brakin bad" → "brak* bad*", then "br* ba*"), keep only similar titles

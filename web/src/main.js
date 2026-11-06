@@ -2,6 +2,7 @@ import './style.css';
 import { api, LoginRequired } from './api.js';
 import { openDatabase, forgetDatabase } from './dataload.js';
 import { suggest, finalScore } from './foryou.js';
+import { buildTaste } from './taste.js';
 import { searchTitles, MIN_CHARS } from './search.js';
 import { account, clearAccount, history, ratings, settings, shared, skipped, watchlist } from './store.js';
 import { recommendationsFor, providersFor } from './tmdb.js';
@@ -148,7 +149,7 @@ function showResults() {
     empty.textContent = 'Type a film or series title — results appear as you type.';
     return;
   }
-  let rows = searchTitles(tdb, text, nfOnly ? 300 : 30).map(mark);
+  let rows = searchTitles(tdb, text, nfOnly ? 5000 : 30, { wide: nfOnly }).map(mark);
   if (nfOnly) rows = rows.filter((r) => r.netflix).slice(0, 30);
   $('#list-head').hidden = false;
   $('#list-head').textContent = (rows.length ? `${rows.length}${rows.length === 30 ? '+' : ''} result${rows.length === 1 ? '' : 's'}` : 'No results')
@@ -176,6 +177,7 @@ function openTitle(t) {
   const asOf = tdb.meta().netflix_built_at;
   openSheet({
     title: mark(title),
+    context: tdb.ratingContext(title.tconst),
     similar: similar.map(mark),
     netflix: { region: netflixRegion || settings.get().region, on: netflixRegion ? netflix.has(title.tconst) : null,
       asOf: asOf ? new Date(asOf.replace(' ', 'T') + 'Z').toLocaleDateString('de-CH') : '' },
@@ -265,12 +267,28 @@ function renderForYou() {
     return { ...t, why: seed ? `${f.shared && together ? 'For both of you · ' : ''}${who} ${seed}` : '' };
   });
   renderRows($('#foryou'), rows, openTitle);
+  renderTaste();
 
   const empty = $('#foryou-empty');
   empty.hidden = rows.length > 0;
   empty.textContent = ratings.count() < 3
     ? 'Rate a few films you know, and suggestions appear here.'
     : nf ? 'Nothing on Netflix fits yet. Turn off the filter or rate more films.' : 'Nothing to suggest yet. Rate more films you liked.';
+}
+
+function renderTaste() {
+  const rated = ratings.all();
+  const box = $('#taste');
+  const taste = buildTaste(tdb.tasteRows(Object.keys(rated)).map((t) => ({ ...t, rating: rated[t.tconst] })));
+  const lines = [['Genres', taste.genres], ['Directors', taste.directors], ['Actors', taste.actors], ['Decades', taste.decades]]
+    .filter(([, names]) => names.length);
+  box.hidden = lines.length === 0;
+  $('#taste-lines').replaceChildren(...lines.flatMap(([label, names]) => {
+    const dt = document.createElement('dt'), dd = document.createElement('dd');
+    dt.textContent = label;
+    dd.textContent = names.join(' · ');
+    return [dt, dd];
+  }));
 }
 
 $('#fy-netflix').addEventListener('click', () => { settings.set({ forYouNetflix: !settings.get().forYouNetflix }); renderForYou(); });

@@ -151,7 +151,7 @@ All of this runs on the device, using the film database plus your ratings.
 
 - **No image to build:** the stock `node:24-alpine` image runs the uploaded code, read-only, so there's no registry involved.
 - **Upload:** ⚠ don't give CI the existing `deploy` login, because it has sudo and Docker, which equals root on the staging box, and this repo is public. Use a separate SSH key limited to one script, `deploy/receive.sh`. CI pipes it a tar with the app, server and database. It swaps the new version in, and goes back to the previous one if the health check fails.
-- **Backups:** a nightly SQLite backup, keeping 7 days, kept in `data/backups/`. The existing trailmap backup covers Postgres only, so it doesn't include this. Copying them off the VPS is not built yet. Ratings can be re-imported, but the watchlist and app ratings can't.
+- **Backups:** a nightly SQLite backup, keeping 7 days, kept in `data/backups/`. The existing trailmap backup covers Postgres only, so it doesn't include this. `deploy/offsite-backup.sh` copies them to R2; it's installed by hand on the VPS. Ratings can be re-imported, but the watchlist and app ratings can't.
 - **Monitoring:** GitHub's failed-run email covers builds. A free uptime check is optional.
 
 ## Licensing

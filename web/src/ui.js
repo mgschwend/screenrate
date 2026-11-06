@@ -182,7 +182,12 @@ function netflixHtml(netflix, live) {
 let markNetflix = (t) => t;
 export function setNetflixMarker(fn) { markNetflix = fn; }
 
-export function openSheet({ title, similar = [], recommend, netflix, providers, onOpen, onClose }) {
+function contextHtml(c) {
+  if (!c) return '';
+  return `<p class="rating-context">${c.pct <= 50 ? `Top ${c.pct}%` : 'Lower half'} of ${esc(c.genre)} ${esc(c.kind)}</p>`;
+}
+
+export function openSheet({ title, context, similar = [], recommend, netflix, providers, onOpen, onClose }) {
   setupSheetOnce();
   sheetOnClose = onClose || null;
   const body = $('#sheet-body');
@@ -197,6 +202,7 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
         ${title.genres ? `<p class="sub genres">${esc(title.genres.replaceAll(',', ' · '))}</p>` : ''}</div>
     </div>
     <div class="big-rating"><span class="rating">★ ${fmtRating(title.rating)}</span><small>${Number(title.votes).toLocaleString('de-CH')} votes on IMDb</small></div>
+    ${contextHtml(context)}
     <div class="links">
       <a href="${imdbUrl(title.tconst)}" target="_blank" rel="noopener noreferrer">IMDb</a>
       <a href="https://letterboxd.com/imdb/${esc(title.tconst)}/" target="_blank" rel="noopener noreferrer">Letterboxd</a>

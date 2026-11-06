@@ -148,24 +148,76 @@ export class TitleDb {
     } catch { return []; }
   }
 
+  /** Who made these titles and their genres, for the taste profile. Skips ids missing from the database. */
+  tasteRows(ids) {
+    const rows = [];
+    try {
+      for (let i = 0; i < ids.length; i += 500) {
+        const part = ids.slice(i, i + 500);
+        rows.push(...this.db.selectObjects(`SELECT t.tconst, t.year, t.genres, p.people FROM titles t
+          LEFT JOIN title_people p ON p.id = CAST(substr(t.tconst, 3) AS INTEGER)
+          WHERE t.tconst IN (${part.map(() => '?').join(',')})`, part));
+      }
+      const codes = [...new Set(rows.flatMap((r) => (r.people || '').split(',').filter(Boolean).map((c) => Number(c.slice(1)))))];
+      const names = new Map();
+      for (let i = 0; i < codes.length; i += 500) {
+        const part = codes.slice(i, i + 500);
+        for (const p of this.db.selectObjects(`SELECT id, name FROM people WHERE id IN (${part.map(() => '?').join(',')})`, part)) names.set(p.id, p.name);
+      }
+      return rows.map((r) => ({
+        tconst: r.tconst, year: r.year, genres: (r.genres || '').split(',').filter(Boolean),
+        people: (r.people || '').split(',').filter(Boolean).map((c) => ({ role: c[0], name: names.get(Number(c.slice(1))) })).filter((p) => p.name),
+      }));
+    } catch { return []; } // database built before credits existed
+  }
+
+  /**
+   * Where a title stands among its genre and kind. Takes the genre it does best in, among genres
+   * big enough for a percentage to mean something.
+   * @returns {{pct, genre, kind}|null} pct 3 = top 3%
+   */
+  ratingContext(tconst, minTitles = 100) {
+    try {
+      const t = this.db.selectObject('SELECT type, rating, genres FROM titles WHERE tconst = ?', [tconst]);
+      const genres = (t?.genres || '').split(',').filter(Boolean);
+      const film = t?.type === 'movie';
+      let best = null;
+      for (const genre of genres) {
+        const row = this.db.selectObject(`SELECT COUNT(*) AS total, SUM(rating > ?) AS better FROM titles
+          WHERE (',' || genres || ',') LIKE ? AND (type = 'movie') = ?`, [t.rating, `%,${genre},%`, film ? 1 : 0]);
+        if (row.total < minTitles) continue;
+        const pct = Math.max(1, Math.ceil(((row.better + 1) / row.total) * 100));
+        if (!best || pct < best.pct) best = { pct, genre, kind: film ? 'films' : 'series' };
+      }
+      return best;
+    } catch { return null; }
+  }
+
   /**
    * Browse by quality rather than by name.
-   * mode: 'gems' well rated but little known | 'top' best rated with many votes | 'new' recent and good
+   * mode: 'gems' well rated but not widely known | 'top' best rated with many votes | 'new' recent and good
    * type: '' | 'film' | 'series'; genre: '' or an IMDb genre; region: only titles on Netflix there
    * Best first, by rating; `year` is passed in so "recent" is testable.
    */
   discover({ mode = 'gems', type = '', genre = '', region = null, limit = 300, year = new Date().getFullYear() } = {}) {
     const where = [], args = [];
     if (region) args.push(region);
-    if (mode === 'gems') where.push('t.rating >= 7.5', 't.votes BETWEEN 5000 AND 100000');
+    if (mode === 'gems') {
+      where.push('t.rating >= 7.5', 't.votes BETWEEN 25000 AND 200000');
+      if (genre !== 'Animation') where.push("(',' || t.genres || ',') NOT LIKE '%,Animation,%'");
+    }
     if (mode === 'top') where.push('t.votes >= 50000');
     if (mode === 'new') { where.push('t.year >= ?', 't.rating >= 6.8', 't.votes >= 2000'); args.push(year - 2); }
     if (type === 'film') where.push("t.type = 'movie'");
     if (type === 'series') where.push("t.type != 'movie'");
     if (genre) { where.push("(',' || t.genres || ',') LIKE ?"); args.push(`%,${genre},%`); }
     const join = region ? "JOIN netflix n ON t.tconst = 'tt' || printf('%07d', n.id) AND n.region = ?" : '';
-    return this.db.selectObjects(`SELECT ${COLS} FROM titles t ${join} WHERE ${where.join(' AND ')}
-      ORDER BY t.rating DESC, t.votes DESC LIMIT ?`, [...args, limit]).map(plain);
+    const rows = this.db.selectObjects(`SELECT ${COLS} FROM titles t ${join} WHERE ${where.join(' AND ')}
+      ORDER BY t.rating DESC, t.votes DESC LIMIT ?`, [...args, mode === 'gems' ? Math.max(limit, 2000) : limit]).map(plain);
+    if (mode !== 'gems') return rows;
+    // Fan favourites with few voters rate very high; more votes count as more proof.
+    const score = (t) => t.rating + 0.5 * Math.log10(t.votes);
+    return rows.sort((a, b) => score(b) - score(a)).slice(0, limit);
   }
 
   /** Most-voted titles on Netflix in `region`, for browsing without a search term. */

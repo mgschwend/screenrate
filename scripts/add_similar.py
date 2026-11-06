@@ -13,6 +13,8 @@ Tables added:
       id = numeric part of tconst (tt0113277 → 113277); others = comma-separated ids, best first;
       why = aligned with others: strongest shared person as role + people.id, e.g. "d12,a7" (d/w/a).
   people(id INTEGER PRIMARY KEY, name TEXT)
+  title_people(id INTEGER PRIMARY KEY, people TEXT)
+      who made a title: role + people.id, comma-separated, e.g. "d12,w3,a7". Directors, writers, two lead actors.
 
 Usage:  pip install pandas numpy
         python add_similar.py imdb.sqlite [--cache .imdb_cache]
@@ -30,6 +32,7 @@ RATING_WEIGHT = 0.4
 MAX_TITLES_PER_PERSON = 60          # cap prolific people (keeps pair count bounded)
 CATEGORY_WEIGHT = {"director": 3.0, "writer": 2.0}
 LEAD_ACTOR_WEIGHT, ACTOR_WEIGHT, MAX_ACTOR_ORDERING = 1.5, 1.0, 5
+MAX_CREDITS_PER_TITLE = 6
 
 
 def log(msg): print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -98,6 +101,9 @@ def main():
     p.loc[actor & (p.ordering > 2), "w"] = ACTOR_WEIGHT
     p = p.groupby(["tconst", "nconst"], as_index=False).w.max()   # one link per person/title (strongest role)
     p["id"] = tid(p.tconst)
+    # Credits for the taste profile: taken before the per-person cap, which would hide prolific people.
+    credits = p[p.w >= LEAD_ACTOR_WEIGHT].sort_values(["id", "w"], ascending=[True, False]).groupby("id").head(MAX_CREDITS_PER_TITLE)
+    credits = credits.assign(role=np.select([credits.w >= CATEGORY_WEIGHT["director"], credits.w >= CATEGORY_WEIGHT["writer"]], ["d", "w"], "a"))
     p = p.merge(titles[["id", "votes"]], on="id")
     p = p.sort_values("votes", ascending=False).groupby("nconst").head(MAX_TITLES_PER_PERSON)
     person_cat = p.nconst.astype("category")
@@ -134,25 +140,28 @@ def main():
     top = top.merge(strongest, on=["id_a", "id_b"], how="left")
 
     # ---- why: the strongest shared person, by name ----
-    used = np.sort(top.person.unique())
-    want = set(nconsts[used])
+    want = set(nconsts[np.sort(top.person.unique())]) | set(credits.nconst)
     log(f"reading names of {len(want):,} people …")
     names = {}
     for chunk in pd.read_csv(download("names", args.cache), sep="\t", na_values="\\N", usecols=["nconst", "primaryName"],
                              dtype=str, chunksize=2_000_000, quoting=3):
         chunk = chunk[chunk.nconst.isin(want)]
         names.update(zip(chunk.nconst, chunk.primaryName))
-    people = {code: i for i, code in enumerate(used)}
+    people = {nconst: i for i, nconst in enumerate(sorted(want))}
     role = np.select([top.person_s >= CATEGORY_WEIGHT["director"], top.person_s >= CATEGORY_WEIGHT["writer"]], ["d", "w"], "a")
-    top["why"] = [f"{r}{people[c]}" for r, c in zip(role, top.person)]
+    top["why"] = [f"{r}{people[nconsts[c]]}" for r, c in zip(role, top.person)]
+    made_by = credits.assign(code=[f"{r}{people[n]}" for r, n in zip(credits.role, credits.nconst)]).groupby("id", sort=False).code.apply(",".join)
     agg = top.groupby("id_a", sort=False).agg(others=("id_b", lambda s: ",".join(map(str, s))), why=("why", ",".join)).reset_index()
 
     con.execute("DROP TABLE IF EXISTS similar")
     con.execute("DROP TABLE IF EXISTS people")
+    con.execute("DROP TABLE IF EXISTS title_people")
     con.execute("CREATE TABLE similar (id INTEGER PRIMARY KEY, others TEXT NOT NULL, why TEXT NOT NULL)")
     con.execute("CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
     con.executemany("INSERT INTO similar VALUES (?, ?, ?)", agg.itertuples(index=False))
-    con.executemany("INSERT INTO people VALUES (?, ?)", [(i, names.get(nconsts[c]) or "") for c, i in people.items()])
+    con.execute("CREATE TABLE title_people (id INTEGER PRIMARY KEY, people TEXT NOT NULL)")
+    con.executemany("INSERT INTO people VALUES (?, ?)", [(i, names.get(n) or "") for n, i in people.items()])
+    con.executemany("INSERT INTO title_people VALUES (?, ?)", [(int(i), code) for i, code in made_by.items()])
     con.execute("INSERT OR REPLACE INTO meta VALUES ('similar_count', ?)", (str(len(agg)),))
     con.commit(); con.execute("VACUUM"); con.close()
     log(f"done: similar lists for {len(agg):,} titles, {os.path.getsize(args.db)/1e6:.1f} MB, {time.time()-t0:.0f}s")
