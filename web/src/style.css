@@ -123,7 +123,15 @@ img.fade { animation: fade .2s ease-out; }
   position: relative; width: 104px; height: 156px; border-radius: 8px; background: var(--bg3); display: grid;
   place-items: center; text-align: center; font-size: .8rem; color: var(--muted); padding: .4rem; overflow: hidden;
 }
-.card > span { display: block; font-size: .78rem; margin-top: .3rem; line-height: 1.3; min-height: 3lh; /* title + year, or two-line title + year */ }
+.card > span { display: block; font-size: .78rem; margin-top: .3rem; line-height: 1.3; min-height: 4lh; /* up to two title lines, year, reason */ }
+.card .why { display: block; font-style: normal; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.related-head { display: flex; align-items: center; justify-content: space-between; margin-top: 1.1rem; }
+.related-head h3 { margin: 0; }
+.chip { display: flex; align-items: center; padding: .3rem .6rem; border-radius: 999px; font-size: .8rem; color: var(--muted); }
+.chip .nf { margin-right: .3rem; vertical-align: 0; }
+.chip.on { color: var(--fg); border-color: #e50914; }
+#related .strip { margin-top: .5rem; }
+.related-none { margin: .5rem 0 0; font-size: .9rem; }
 .card span b {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-weight: 600;
 }

@@ -58,27 +58,45 @@ export class TitleDb {
   }
 
   /** Precomputed similar titles (scripts/add_similar.py), best first. [] if the DB predates that step. */
-  similar(tconst, limit = 10) {
-    let ids = [];
+  similar(tconst, limit = 12) {
+    let ids = [], why = [];
+    const id = Number(tconst.slice(2));
     try {
-      const row = this.db.selectValue('SELECT others FROM similar WHERE id = ?', [Number(tconst.slice(2))]);
-      if (row) ids = row.split(',').slice(0, limit).map((n) => `tt${n.padStart(7, '0')}`);
-    } catch { return []; }
+      const row = this.db.selectObject('SELECT others, why FROM similar WHERE id = ?', [id]);
+      if (row) { ids = row.others.split(','); why = row.why.split(','); }
+    } catch {
+      try { // DB built before reasons existed
+        ids = (this.db.selectValue('SELECT others FROM similar WHERE id = ?', [id]) || '').split(',').filter(Boolean);
+      } catch { return []; }
+    }
+    ids = ids.slice(0, limit).map((n) => `tt${n.padStart(7, '0')}`);
     if (!ids.length) return [];
     const rows = this.db.selectObjects(`SELECT ${COLS} FROM titles t WHERE t.tconst IN (${ids.map(() => '?').join(',')})`, ids).map(plain);
     const byId = new Map(rows.map((r) => [r.tconst, r]));
-    return ids.map((i) => byId.get(i)).filter(Boolean);
+    return ids.map((i, n) => {
+      const t = byId.get(i);
+      return t && { ...t, why: this.#reason(why[n]) };
+    }).filter(Boolean);
+  }
+
+  /** "d12" → "Dir. Christopher Nolan" (see scripts/add_similar.py). */
+  #reason(code) {
+    if (!code) return '';
+    const name = this.db.selectValue('SELECT name FROM people WHERE id = ?', [Number(code.slice(1))]);
+    if (!name) return '';
+    return `${{ d: 'Dir.', w: 'Writer', a: 'With' }[code[0]]} ${name}`;
   }
 
   /** Fallback when no precomputed list: most-voted titles sharing the first genre and type. */
-  sameGenre(tconst, limit = 10) {
+  sameGenre(tconst, limit = 12) {
     try {
       const g = this.db.selectValue('SELECT genres FROM titles WHERE tconst = ?', [tconst]);
       const first = (g || '').split(',')[0];
       if (!first) return [];
       return this.db.selectObjects(
         `SELECT ${COLS} FROM titles t WHERE t.tconst != ?1 AND (',' || t.genres || ',') LIKE '%,' || ?2 || ',%'
-           AND t.type = (SELECT type FROM titles WHERE tconst = ?1) ORDER BY t.votes DESC LIMIT ?3`, [tconst, first, limit]).map(plain);
+           AND t.type = (SELECT type FROM titles WHERE tconst = ?1) ORDER BY t.votes DESC LIMIT ?3`, [tconst, first, limit])
+        .map((t) => ({ ...plain(t), why: `Also ${first}` }));
     } catch { return []; }
   }
 

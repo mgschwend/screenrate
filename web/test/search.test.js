@@ -35,7 +35,11 @@ before(async () => {
   db.exec(`CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE netflix (region TEXT NOT NULL, id INTEGER NOT NULL, PRIMARY KEY (region, id)) WITHOUT ROWID;
     INSERT INTO meta VALUES ('netflix_regions', 'CH');
-    INSERT INTO netflix VALUES ('CH', 903747), ('CH', 15239678);`);
+    INSERT INTO netflix VALUES ('CH', 903747), ('CH', 15239678);
+    CREATE TABLE similar (id INTEGER PRIMARY KEY, others TEXT NOT NULL, why TEXT NOT NULL);
+    CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+    INSERT INTO similar VALUES (903747, '15239678', 'd0');
+    INSERT INTO people VALUES (0, 'Vince Gilligan');`);
   tdb = new TitleDb(db);
 });
 
@@ -85,4 +89,7 @@ test('Netflix availability per region', () => {
   assert.ok(top.every((t) => ch.has(t.tconst)));
   assert.ok(top[0].votes >= top[1].votes);
   assert.deepEqual(tdb.netflixTop('DE'), []);
+  const sim = tdb.similar('tt0903747');
+  assert.equal(sim[0].tconst, 'tt15239678');
+  assert.equal(sim[0].why, 'Dir. Vince Gilligan');
 });

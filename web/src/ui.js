@@ -1,6 +1,7 @@
 // DOM rendering: result rows, watchlist, detail sheet with similar titles, toast.
 import { watchlist, settings } from './store.js';
 import { posterFor } from './tmdb.js';
+import { mergeRelated } from './related.js';
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -120,7 +121,7 @@ function setupSheetOnce() {
 function cardHtml(c) {
   return `<button type="button" class="card" data-tconst="${esc(c.tconst)}">
     <div class="poster-wrap"><div class="poster" data-poster="${esc(c.tconst)}">${esc(c.title)}</div>${c.netflix ? '<span class="nf nf-card">N</span>' : ''}</div>
-    <span><b>${esc(c.title)}</b>${esc(c.year ?? '')} · ★ ${fmtRating(c.rating)}</span></button>`;
+    <span><b>${esc(c.title)}</b>${esc(c.year ?? '')} · ★ ${fmtRating(c.rating)}${c.why ? `<em class="why">${esc(c.why)}</em>` : ''}</span></button>`;
 }
 
 /**
@@ -147,16 +148,9 @@ function fillPosters(root) {
   }
 }
 
-function stripSection(id, heading, rows) {
-  return `<section id="${id}" ${rows.length ? '' : 'hidden'}><h3>${esc(heading)}</h3>
-    <div class="strip">${rows.map(cardHtml).join('')}</div></section>`;
-}
-
-/** Same footprint as a loaded strip, so Similar doesn't jump when recommendations arrive. */
-function stripSkeleton(id, heading) {
-  const card = '<div class="card skel" aria-hidden="true"><div class="poster"></div><span><b></b></span></div>';
-  return `<section id="${id}"><h3>${esc(heading)}</h3><div class="strip">${card.repeat(10)}</div></section>`;
-}
+const SHOWN = 10;
+const SKELETON = '<div class="card skel" aria-hidden="true"><div class="poster"></div><span><b></b></span></div>'.repeat(SHOWN);
+let relatedNetflixOnly = false; // kept while moving from title to title
 
 /**
  * Detail sheet for `title`.
@@ -201,8 +195,11 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
     </div>
     <div id="avail">${netflixHtml(netflix, live)}</div>
     <button type="button" class="wl-btn ${inWl ? 'on' : ''}">${inWl ? '✓ On watchlist' : '+ Add to watchlist'}</button>
-    ${live ? stripSkeleton('recs', 'Recommended (TMDB)') : ''}
-    ${stripSection('similar', 'Similar', similar)}`;
+    <section id="related">
+      <div class="related-head"><h3>More like this</h3>
+        ${netflix?.on != null ? `<button type="button" class="chip" aria-pressed="false"><span class="nf">N</span>On Netflix</button>` : ''}</div>
+      <div class="strip">${SKELETON}</div>
+    </section>`;
 
   const btn = body.querySelector('.wl-btn');
   btn.onclick = () => {
@@ -216,8 +213,6 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
     for (const card of root.querySelectorAll('.card')) card.onclick = () => onOpen(card.dataset.tconst);
     fillPosters(root);
   };
-  wireCards(body);
-
   providers?.then((p) => {
     const box = body.querySelector('#avail');
     if (!box?.isConnected) return;
@@ -228,12 +223,29 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
       <p class="jw">Streaming data: JustWatch (via TMDB)</p>`;
   });
 
-  recommend?.then((rows) => {
-    const sec = body.querySelector('#recs');
-    if (!sec?.isConnected) return;
-    if (!rows.length) { sec.remove(); return; }
-    sec.outerHTML = stripSection('recs', 'Recommended (TMDB)', rows.map(markNetflix));
-    wireCards(body.querySelector('#recs'));
+  fillPosters(body.querySelector('.detail-head'));
+  const sec = body.querySelector('#related');
+  const chip = sec.querySelector('.chip');
+  let all = [];
+  const renderRelated = () => {
+    const rows = (relatedNetflixOnly ? all.filter((t) => t.netflix) : all).slice(0, SHOWN);
+    chip?.setAttribute('aria-pressed', String(relatedNetflixOnly));
+    chip?.classList.toggle('on', relatedNetflixOnly);
+    const strip = sec.querySelector('.strip');
+    strip.innerHTML = rows.map(cardHtml).join('');
+    const none = sec.querySelector('.related-none');
+    none?.remove();
+    if (!rows.length) strip.insertAdjacentHTML('afterend', `<p class="related-none muted">${
+      relatedNetflixOnly ? `None of these are on Netflix in ${esc(netflix?.region || '')}.` : 'No suggestions for this title.'}</p>`);
+    wireCards(sec);
+  };
+  if (chip) chip.onclick = () => { relatedNetflixOnly = !relatedNetflixOnly; renderRelated(); };
+  // One render, so cards never reshuffle; a slow TMDB answer just misses this sheet.
+  const late = new Promise((done) => { setTimeout(done, 2500, []); });
+  Promise.race([live && recommend ? recommend : [], late]).then((recs) => {
+    if (!sec.isConnected) return;
+    all = mergeRelated(recs, similar, title.rating).map(markNetflix);
+    renderRelated();
   });
 
   $('#sheet').hidden = false;

@@ -3,12 +3,16 @@
 Add genres and precomputed "similar titles" to an imdb.sqlite built by build_imdb_db.py.
 
 Similarity = shared people (director 3, writer 2, lead actors 1.5 / supporting 1) + genre overlap
-(Jaccard × 2) + same type (film/series) 0.5 + a small popularity prior. Top SIMILAR_K per title.
+(Jaccard × 2) + same type (film/series) 0.5 + a small popularity prior + rating. Titles rated below
+min(MIN_RATING, the title's own rating - 0.5) are dropped, so a good film only suggests good films.
+Top SIMILAR_K per title.
 
 Tables added:
   titles.genres  TEXT        e.g. "Action,Adventure,Drama"
-  similar(id INTEGER PRIMARY KEY, others TEXT)
-      id = numeric part of tconst (tt0113277 → 113277); others = comma-separated ids, best first.
+  similar(id INTEGER PRIMARY KEY, others TEXT, why TEXT)
+      id = numeric part of tconst (tt0113277 → 113277); others = comma-separated ids, best first;
+      why = aligned with others: strongest shared person as role + people.id, e.g. "d12,a7" (d/w/a).
+  people(id INTEGER PRIMARY KEY, name TEXT)
 
 Usage:  pip install pandas numpy
         python add_similar.py imdb.sqlite [--cache .imdb_cache]
@@ -19,8 +23,10 @@ import numpy as np
 import pandas as pd
 
 BASE = "https://datasets.imdbws.com/"
-FILES = {"basics": "title.basics.tsv.gz", "principals": "title.principals.tsv.gz"}
-SIMILAR_K = 10
+FILES = {"basics": "title.basics.tsv.gz", "principals": "title.principals.tsv.gz", "names": "name.basics.tsv.gz"}
+SIMILAR_K = 12
+MIN_RATING = 6.5
+RATING_WEIGHT = 0.4
 MAX_TITLES_PER_PERSON = 60          # cap prolific people (keeps pair count bounded)
 CATEGORY_WEIGHT = {"director": 3.0, "writer": 2.0}
 LEAD_ACTOR_WEIGHT, ACTOR_WEIGHT, MAX_ACTOR_ORDERING = 1.5, 1.0, 5
@@ -51,7 +57,7 @@ def main():
     t0 = time.time()
 
     con = sqlite3.connect(args.db)
-    titles = pd.read_sql("SELECT tconst, type, votes FROM titles", con)
+    titles = pd.read_sql("SELECT tconst, type, votes, rating FROM titles", con)
     titles["id"] = tid(titles.tconst)
     keep = set(titles.tconst)
     log(f"{len(titles):,} titles in {args.db}")
@@ -94,7 +100,9 @@ def main():
     p["id"] = tid(p.tconst)
     p = p.merge(titles[["id", "votes"]], on="id")
     p = p.sort_values("votes", ascending=False).groupby("nconst").head(MAX_TITLES_PER_PERSON)
-    p["person"] = p.nconst.astype("category").cat.codes.astype(np.int32)
+    person_cat = p.nconst.astype("category")
+    nconsts = person_cat.cat.categories
+    p["person"] = person_cat.cat.codes.astype(np.int32)
     p = p[["person", "id", "w"]]
     log(f"  {len(p):,} person–title links")
 
@@ -103,10 +111,12 @@ def main():
     pairs = p.merge(p, on="person", suffixes=("_a", "_b"))
     pairs = pairs[pairs.id_a != pairs.id_b]
     pairs["s"] = np.minimum(pairs.w_a, pairs.w_b)
+    strongest = pairs.loc[pairs.groupby(["id_a", "id_b"]).s.idxmax(), ["id_a", "id_b", "person", "s"]]
+    strongest = strongest.rename(columns={"s": "person_s"})
     pairs = pairs.groupby(["id_a", "id_b"], as_index=False).s.sum()
     log(f"  {len(pairs):,} candidate pairs")
 
-    info = titles.set_index("id")[["gmask", "type", "votes"]]
+    info = titles.set_index("id")[["gmask", "type", "votes", "rating"]]
     ga = info.gmask.reindex(pairs.id_a).to_numpy(np.int64)
     gb = info.gmask.reindex(pairs.id_b).to_numpy(np.int64)
     inter = np.array([bin(x).count("1") for x in (ga & gb)], dtype=np.float32)
@@ -114,14 +124,35 @@ def main():
     jaccard = np.divide(inter, union, out=np.zeros_like(inter), where=union > 0)
     same_type = (info.type.reindex(pairs.id_a).to_numpy() == info.type.reindex(pairs.id_b).to_numpy()).astype(np.float32)
     prior = np.log10(info.votes.reindex(pairs.id_b).to_numpy(np.float64)) * 0.15
-    pairs["score"] = pairs.s.to_numpy() + 2.0 * jaccard + 0.5 * same_type + prior
+    rating_a = info.rating.reindex(pairs.id_a).to_numpy(np.float64)
+    rating_b = info.rating.reindex(pairs.id_b).to_numpy(np.float64)
+    pairs["score"] = pairs.s.to_numpy() + 2.0 * jaccard + 0.5 * same_type + prior + RATING_WEIGHT * (rating_b - 7)
+    pairs = pairs[rating_b >= np.minimum(MIN_RATING, rating_a - 0.5)]
+    log(f"  {len(pairs):,} pairs above the rating floor")
 
     top = pairs.sort_values(["id_a", "score"], ascending=[True, False]).groupby("id_a").head(SIMILAR_K)
-    agg = top.groupby("id_a").id_b.apply(lambda s: ",".join(map(str, s))).reset_index()
+    top = top.merge(strongest, on=["id_a", "id_b"], how="left")
+
+    # ---- why: the strongest shared person, by name ----
+    used = np.sort(top.person.unique())
+    want = set(nconsts[used])
+    log(f"reading names of {len(want):,} people …")
+    names = {}
+    for chunk in pd.read_csv(download("names", args.cache), sep="\t", na_values="\\N", usecols=["nconst", "primaryName"],
+                             dtype=str, chunksize=2_000_000, quoting=3):
+        chunk = chunk[chunk.nconst.isin(want)]
+        names.update(zip(chunk.nconst, chunk.primaryName))
+    people = {code: i for i, code in enumerate(used)}
+    role = np.select([top.person_s >= CATEGORY_WEIGHT["director"], top.person_s >= CATEGORY_WEIGHT["writer"]], ["d", "w"], "a")
+    top["why"] = [f"{r}{people[c]}" for r, c in zip(role, top.person)]
+    agg = top.groupby("id_a", sort=False).agg(others=("id_b", lambda s: ",".join(map(str, s))), why=("why", ",".join)).reset_index()
 
     con.execute("DROP TABLE IF EXISTS similar")
-    con.execute("CREATE TABLE similar (id INTEGER PRIMARY KEY, others TEXT NOT NULL)")
-    con.executemany("INSERT INTO similar VALUES (?, ?)", agg.itertuples(index=False))
+    con.execute("DROP TABLE IF EXISTS people")
+    con.execute("CREATE TABLE similar (id INTEGER PRIMARY KEY, others TEXT NOT NULL, why TEXT NOT NULL)")
+    con.execute("CREATE TABLE people (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+    con.executemany("INSERT INTO similar VALUES (?, ?, ?)", agg.itertuples(index=False))
+    con.executemany("INSERT INTO people VALUES (?, ?)", [(i, names.get(nconsts[c]) or "") for c, i in people.items()])
     con.execute("INSERT OR REPLACE INTO meta VALUES ('similar_count', ?)", (str(len(agg)),))
     con.commit(); con.execute("VACUUM"); con.close()
     log(f"done: similar lists for {len(agg):,} titles, {os.path.getsize(args.db)/1e6:.1f} MB, {time.time()-t0:.0f}s")

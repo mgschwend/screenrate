@@ -154,7 +154,7 @@ function openTitle(t) {
     netflix: { region: netflixRegion || settings.get().region, on: netflixRegion ? netflix.has(title.tconst) : null,
       asOf: asOf ? new Date(asOf.replace(' ', 'T') + 'Z').toLocaleDateString('de-CH') : '' },
     providers: providersFor(title.tconst, netflixRegion || settings.get().region),
-    recommend: recommendationsFor(tdb, title.tconst),
+    recommend: recommendationsFor(tdb, title.tconst, 20),
     onOpen: openTitle,
     onClose: () => { if (!q.value.trim()) showResults(); if (!$('#view-watchlist').hidden) renderWatchlist(openTitle); },
   });
