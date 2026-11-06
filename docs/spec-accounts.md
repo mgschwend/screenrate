@@ -111,7 +111,14 @@ The TMDB key lives only on the server. That also solves "don't type the key in t
 5. Titles missing from the film database are kept, because they may appear later.
 6. The app reports what happened, for example "1,204 ratings, 37 not in the database".
 
-⚠ The column names come from third-party pages, not from IMDb. We need one real export to confirm them. Ratings can't be written back to IMDb, so an app rating stays in ScreenRate.
+Confirmed with a real export on 2026-11-06. Header:
+
+`Const,Your Rating,Date Rated,Title,Original Title,URL,Title Type,IMDb Rating,Runtime (mins),Year,Genres,Num Votes,Release Date,Directors`
+
+- `Date Rated` is ISO (`2026-11-05`), and the file has a final empty line.
+- ⚠ Values follow the IMDb account language: `Title Type` was `Fernsehserie` and `Genres` was `Komödie, Thriller`. The import must ignore those columns and use the film database instead.
+- ⚠ That export held a single rating, so "For you" needs more data before it's useful. Rating inside the app is therefore part of the first version, not an extra.
+- Ratings can't be written back to IMDb, so an app rating stays in ScreenRate.
 
 ## What this unlocks
 
@@ -174,7 +181,7 @@ Steps 1–3 replace what exists. Steps 4–5 are the new value.
 
 ## Open questions
 
-1. One real IMDb ratings CSV, to confirm the columns (Marc is providing it).
+None. DNS record for `ratings.localtrails.ch` is the only prerequisite left.
 
 ## Sources
 
