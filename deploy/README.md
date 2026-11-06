@@ -59,11 +59,11 @@ staging stack. It uses that stack's Traefik and nothing else from it.
    ```
 
    ```bash
-   docker compose run --rm -it app node set-password.js marc
+   docker compose exec app node set-password.js marc
    ```
 
    ```bash
-   docker compose run --rm -it app node set-password.js thomas
+   docker compose exec app node set-password.js thomas
    ```
 
 ## Everyday
