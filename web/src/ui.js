@@ -155,7 +155,7 @@ function stripSection(id, heading, rows) {
 /** Same footprint as a loaded strip, so Similar doesn't jump when recommendations arrive. */
 function stripSkeleton(id, heading) {
   const card = '<div class="card skel" aria-hidden="true"><div class="poster"></div><span><b></b></span></div>';
-  return `<section id="${id}"><h3>${esc(heading)}</h3><div class="strip">${card.repeat(5)}</div></section>`;
+  return `<section id="${id}"><h3>${esc(heading)}</h3><div class="strip">${card.repeat(10)}</div></section>`;
 }
 
 /**

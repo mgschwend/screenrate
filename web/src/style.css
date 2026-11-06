@@ -123,12 +123,10 @@ img.fade { animation: fade .2s ease-out; }
   position: relative; width: 104px; height: 156px; border-radius: 8px; background: var(--bg3); display: grid;
   place-items: center; text-align: center; font-size: .8rem; color: var(--muted); padding: .4rem; overflow: hidden;
 }
-.card span { display: block; font-size: .78rem; margin-top: .3rem; line-height: 1.3; }
+.card span { display: block; font-size: .78rem; margin-top: .3rem; line-height: 1.3; min-height: 3lh; /* title + year, or two-line title + year */ }
 .card span b {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-weight: 600;
-  min-height: 2lh; /* one- and two-line titles take the same space */
 }
-.card.skel span { min-height: 3lh; }
 
 /* desktop: centred column, tabs on top, detail as a dialog, strips wrap instead of scrolling sideways */
 @media (min-width: 700px) {
