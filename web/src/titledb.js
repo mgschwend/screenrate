@@ -212,7 +212,8 @@ export class TitleDb {
     const where = [], args = [];
     if (region) args.push(region);
     if (mode === 'gems') {
-      where.push('t.rating >= 7.5', 't.votes BETWEEN 25000 AND 200000');
+      // A language alone is a small pool, so a lower vote floor keeps the list worth browsing.
+      where.push('t.rating >= 7.5', `t.votes BETWEEN ${langs.length ? 5000 : 25000} AND 200000`);
       if (genre !== 'Animation') where.push("(',' || t.genres || ',') NOT LIKE '%,Animation,%'");
     }
     if (mode === 'top') where.push('t.votes >= 50000');

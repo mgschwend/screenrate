@@ -261,7 +261,7 @@ function renderDiscover() {
   const d = settings.get().discover;
   const genreSel = $('#dc-genre');
   if (!genreSel.options.length) {
-    genreSel.innerHTML = `<option value="">All genres</option>${tdb.genres().map((g) => `<option>${g}</option>`).join('')}`;
+    genreSel.innerHTML = `<option value="">Genre</option>${tdb.genres().map((g) => `<option>${g}</option>`).join('')}`;
   }
   genreSel.value = d.genre;
   for (const b of document.querySelectorAll('#dc-modes .chip')) {

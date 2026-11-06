@@ -112,6 +112,7 @@ test('original language filter', () => {
   assert.equal(tdb.languageSet(['en', 'fr']).size, 3);
   assert.equal(tdb.get('tt0211915').lang, 'fr');
   assert.deepEqual(tdb.discover({ mode: 'gems', langs: ['en'], year: 2026 }).map((t) => t.tconst), ['tt8000001']);
+  assert.deepEqual(tdb.discover({ mode: 'gems', langs: ['fr'], year: 2026 }).map((t) => t.tconst), ['tt8000002']); // 9k votes pass with a language
   assert.deepEqual(tdb.discover({ mode: 'top', langs: ['fr'], year: 2026 }).map((t) => t.tconst), ['tt0211915']);
 });
 
