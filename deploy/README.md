@@ -72,12 +72,12 @@ staging stack. It uses that stack's Traefik and nothing else from it.
 - **Logs:** `docker compose logs -f app`
 - **Stop it completely:** `docker compose down`. This leaves trailmap and the data alone.
 - **Backups:** the server writes one copy of `app.sqlite` per day to `data/backups/` and keeps seven.
-  `offsite-backup.sh` copies the newest one to Cloudflare R2 under `screenrate/` and keeps 30 days. It borrows the
-  trailmap backup container's tool and key, so it depends on that container running. See below to install it.
+  `offsite-backup.sh` copies the newest one to Cloudflare R2 and keeps 30 days. See below.
 
 ## Off-site backup
 
-On the VPS, copy `deploy/offsite-backup.sh` to `~/screenrate/`, make it executable, then run it once and schedule it:
+It needs its own R2 bucket and a token limited to that bucket, stored in `~/screenrate/backup.env` (permissions 600)
+with `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `R2_ENDPOINT` and `R2_BUCKET`. On the VPS, run it once, then schedule it:
 
 ```bash
 ~/screenrate/offsite-backup.sh
