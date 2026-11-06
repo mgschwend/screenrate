@@ -93,7 +93,7 @@ test('Discover: modes, filters and Netflix', () => {
   assert.deepEqual(ids2({ mode: 'top', type: 'series' }), ['tt0903747']);
   assert.deepEqual(ids2({ mode: 'top', genre: 'Crime', type: 'film' }), ['tt0068646']);
   assert.ok(!ids2({ mode: 'top', genre: 'Drama' }).includes('tt1160419'));
-  assert.deepEqual(ids2({ mode: 'new' }), ['tt8000001']);
+  assert.deepEqual(ids2({ mode: 'new' }), ['tt15239678', 'tt8000001']); // 2024 and 2025, best first
   assert.deepEqual(tdb.genres(), ['Action', 'Adventure', 'Crime', 'Drama']);
 });
 
