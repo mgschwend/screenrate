@@ -27,7 +27,8 @@ self.addEventListener('fetch', (e) => {
   if (url.origin === location.origin) {
     if (url.pathname.endsWith('/imdb.sqlite.enc') || url.pathname.endsWith('/db-version.json')) return;
     if (req.mode === 'navigate') {
-      e.respondWith(fetch(req).then((res) => {
+      // no-cache: revalidate, or the browser reuses the page for up to 10 min (Pages max-age) after a deploy
+      e.respondWith(fetch(req.url, { cache: 'no-cache' }).then((res) => {
         const copy = res.clone();
         caches.open(SHELL).then((c) => c.put('./', copy));
         return res;
