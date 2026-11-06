@@ -72,7 +72,7 @@ jobs:
       - name: Add original languages (TMDB)
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-        run: python scripts/add_languages.py "$RUNNER_TEMP/imdb.sqlite" --cache .tmdb_lang_cache.json --max-seconds ${{ inputs.lang_seconds || 3000 }}
+        run: python scripts/add_languages.py "$RUNNER_TEMP/imdb.sqlite" --cache .tmdb_lang_cache.json --seed data/languages.json --max-seconds ${{ inputs.lang_seconds || 3000 }}
 
       - name: Build web app
         run: npm run build

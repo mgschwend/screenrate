@@ -9,7 +9,9 @@ The first run looks up every title. That can outlast one build, so lookups stop 
 next build carries on from the cache. Found languages never expire; titles TMDB doesn't know are retried
 after RETRY_DAYS.
 
-Usage: TMDB_API_KEY=… python add_languages.py imdb.sqlite [--cache .tmdb_lang_cache.json] [--max-seconds 3000]
+data/languages.json in the repo seeds the cache, so a first run done elsewhere doesn't have to be repeated.
+
+Usage: TMDB_API_KEY=… python add_languages.py imdb.sqlite [--cache .tmdb_lang_cache.json] [--seed data/languages.json] [--max-seconds 3000]
 Without a key the step logs and exits 0 (the app hides the language filter).
 """
 import argparse, json, os, sqlite3, sys, time
@@ -32,6 +34,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("db")
     ap.add_argument("--cache", default=".tmdb_lang_cache.json")
+    ap.add_argument("--seed", default="")
     ap.add_argument("--max-seconds", type=int, default=3000)
     args = ap.parse_args()
     key = os.environ.get("TMDB_API_KEY", "")
@@ -44,6 +47,9 @@ def main():
     if os.path.exists(args.cache):
         with open(args.cache) as f:
             cache = json.load(f)
+    if args.seed and os.path.exists(args.seed):
+        with open(args.seed) as f:
+            cache = {**json.load(f), **cache}
 
     def save():
         with open(args.cache + ".tmp", "w") as f:

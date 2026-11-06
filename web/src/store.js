@@ -26,8 +26,10 @@ export const account = {
 
 const SETTINGS_DEFAULTS = {
   region: 'CH', netflixOnly: false, forYouNetflix: false, withOthers: false,
-  language: '', // '' or comma-separated codes; one filter shared by search, Discover and For you
-  discover: { mode: 'gems', type: '', genre: '', netflix: true },
+  // Shared by search, Discover and For you
+  language: '', // '' or comma-separated codes
+  kind: '',     // '' | 'film' | 'series'
+  discover: { mode: 'gems', genre: '', netflix: true },
 };
 export const settings = {
   get() { return { ...SETTINGS_DEFAULTS, ...read(K.settings, {}) }; },

@@ -23,7 +23,7 @@ function loadNetflix() {
   $('#nf-only').setAttribute('aria-pressed', String(nfOn));
   $('#nf-only').textContent = netflixRegion ? `N ${netflixRegion}` : 'N';
   langKey = null;
-  renderLanguageFilters();
+  renderSharedFilters();
 }
 const mark = (t) => ({ ...t, netflix: netflix.has(t.tconst), mine: ratings.get(t.tconst) });
 setNetflixMarker(mark);
@@ -42,27 +42,45 @@ function languageFilter() {
   return langSet;
 }
 const chosenLangs = () => (tdb.hasLanguages() && settings.get().language ? settings.get().language.split(',') : []);
-const languageLabel = () => (chosenLangs().length ? ` in ${chosenLangs().map((c) => new Intl.DisplayNames(['en'], { type: 'language' }).of(c)).join(', ')}` : '');
+const KINDS = [['', 'All'], ['film', 'Films'], ['series', 'Series']];
+const matchesKind = (t) => {
+  const { kind } = settings.get();
+  return !kind || (kind === 'film') === (t.type === 'movie');
+};
+/** " · Series in French" for list headings; empty with no filter on. */
+const filterLabel = () => {
+  const { kind } = settings.get();
+  const langs = chosenLangs().map((c) => new Intl.DisplayNames(['en'], { type: 'language' }).of(c)).join(', ');
+  const text = [kind && KINDS.find(([v]) => v === kind)[1], langs && `in ${langs}`].filter(Boolean).join(' ');
+  return text ? ` · ${text}` : '';
+};
 
-function renderLanguageFilters() {
-  const on = tdb.hasLanguages();
-  const value = settings.get().language;
-  for (const sel of document.querySelectorAll('.lang-filter')) {
-    if (!sel.options.length) sel.innerHTML = LANGUAGES.map(([v, label]) => `<option value="${v}">${label}</option>`).join('');
-    sel.hidden = !on;
-    sel.value = value;
-    sel.classList.toggle('on', !!value);
+function renderSharedFilters() {
+  const s = settings.get();
+  const fill = (selector, options, value, hidden) => {
+    for (const sel of document.querySelectorAll(selector)) {
+      if (!sel.options.length) sel.innerHTML = options.map(([v, label]) => `<option value="${v}">${label}</option>`).join('');
+      sel.hidden = hidden;
+      sel.value = value;
+      sel.classList.toggle('on', !!value);
+    }
+  };
+  fill('.lang-filter', LANGUAGES, s.language, !tdb.hasLanguages());
+  fill('.kind-filter', KINDS, s.kind, false);
+}
+function bindSharedFilter(selector, key) {
+  for (const sel of document.querySelectorAll(selector)) {
+    sel.addEventListener('change', (e) => {
+      settings.set({ [key]: e.target.value });
+      renderSharedFilters();
+      if (!$('#view-search').hidden) showResults();
+      if (!$('#view-discover').hidden) renderDiscover();
+      if (!$('#view-foryou').hidden) renderForYou();
+    });
   }
 }
-for (const sel of document.querySelectorAll('.lang-filter')) {
-  sel.addEventListener('change', (e) => {
-    settings.set({ language: e.target.value });
-    renderLanguageFilters();
-    if (!$('#view-search').hidden) showResults();
-    if (!$('#view-discover').hidden) renderDiscover();
-    if (!$('#view-foryou').hidden) renderForYou();
-  });
-}
+bindSharedFilter('.lang-filter', 'language');
+bindSharedFilter('.kind-filter', 'kind');
 
 /** Rows in the given order, with status marks; titles missing from the database are left out. */
 function rowsFor(items) {
@@ -170,14 +188,14 @@ function showResults() {
   const list = $('#results'), empty = $('#results-empty');
   const nfOnly = !!netflixRegion && settings.get().netflixOnly;
   const inLang = languageFilter();
-  const keep = (r) => !inLang || inLang.has(r.tconst);
+  const keep = (r) => (!inLang || inLang.has(r.tconst)) && matchesKind(r);
   if (text.replace(/\s/g, '').length < MIN_CHARS && nfOnly) {
-    const rows = tdb.netflixTop(netflixRegion, inLang ? 6000 : 50).filter(keep).slice(0, 50);
+    const rows = tdb.netflixTop(netflixRegion, inLang || settings.get().kind ? 6000 : 50).filter(keep).slice(0, 50);
     $('#list-head').hidden = false;
-    $('#list-head').textContent = `Most popular on Netflix ${netflixRegion}${languageLabel()}`;
+    $('#list-head').textContent = `Most popular on Netflix ${netflixRegion}${filterLabel()}`;
     renderRows(list, rows.map(mark), openTitle);
     empty.hidden = rows.length > 0;
-    empty.textContent = 'Nothing on Netflix in that language.';
+    empty.textContent = 'Nothing on Netflix fits these filters.';
     return;
   }
   if (text.replace(/\s/g, '').length < MIN_CHARS) {
@@ -189,17 +207,17 @@ function showResults() {
     empty.textContent = 'Type a film or series title — results appear as you type.';
     return;
   }
-  const filtered = nfOnly || !!inLang;
+  const filtered = nfOnly || !!inLang || !!settings.get().kind;
   let rows = searchTitles(tdb, text, filtered ? 5000 : 30, { wide: filtered }).map(mark);
   if (filtered) rows = rows.filter((r) => (!nfOnly || r.netflix) && keep(r)).slice(0, 30);
   $('#list-head').hidden = false;
   $('#list-head').textContent = (rows.length ? `${rows.length}${rows.length === 30 ? '+' : ''} result${rows.length === 1 ? '' : 's'}` : 'No results')
-    + (nfOnly ? ` on Netflix ${netflixRegion}` : '') + languageLabel();
+    + (nfOnly ? ` on Netflix ${netflixRegion}` : '') + filterLabel();
   renderRows(list, rows, openTitle);
   list.scrollTop = 0;
   empty.hidden = rows.length > 0;
-  empty.textContent = nfOnly ? `Nothing on Netflix ${netflixRegion} for “${text}”${languageLabel()}. Tap “N” to show everything.`
-    : `Nothing found for “${text}”${languageLabel()}.`;
+  empty.textContent = nfOnly ? `Nothing on Netflix ${netflixRegion} for “${text}”${filterLabel()}. Tap “N” to show everything.`
+    : `Nothing found for “${text}”${filterLabel()}.`;
 }
 
 $('#nf-only').addEventListener('click', () => {
@@ -246,7 +264,6 @@ function renderDiscover() {
     genreSel.innerHTML = `<option value="">All genres</option>${tdb.genres().map((g) => `<option>${g}</option>`).join('')}`;
   }
   genreSel.value = d.genre;
-  $('#dc-type').value = d.type;
   for (const b of document.querySelectorAll('#dc-modes .chip')) {
     b.classList.toggle('on', b.dataset.mode === d.mode);
     b.setAttribute('aria-pressed', String(b.dataset.mode === d.mode));
@@ -258,9 +275,9 @@ function renderDiscover() {
   nfBtn.setAttribute('aria-pressed', String(nf));
 
   const rated = ratings.all();
-  const rows = tdb.discover({ mode: d.mode, type: d.type, genre: d.genre, langs: chosenLangs(), region: nf ? netflixRegion : null })
+  const rows = tdb.discover({ mode: d.mode, type: settings.get().kind, genre: d.genre, langs: chosenLangs(), region: nf ? netflixRegion : null })
     .filter((t) => !rated[t.tconst]).slice(0, DISCOVER_SHOWN).map(mark);
-  $('#dc-head').textContent = `${MODE_LABEL[d.mode]}${nf ? ` on Netflix ${netflixRegion}` : ''}${languageLabel()}`;
+  $('#dc-head').textContent = `${MODE_LABEL[d.mode]}${nf ? ` on Netflix ${netflixRegion}` : ''}${filterLabel()}`;
   renderRows($('#discover'), rows, openTitle);
   $('#discover').scrollTop = 0;
   const empty = $('#discover-empty');
@@ -270,7 +287,6 @@ function renderDiscover() {
 
 const setDiscover = (patch) => { settings.set({ discover: { ...settings.get().discover, ...patch } }); renderDiscover(); };
 $('#dc-modes').addEventListener('click', (e) => { const m = e.target.closest('[data-mode]')?.dataset.mode; if (m) setDiscover({ mode: m }); });
-$('#dc-type').addEventListener('change', (e) => setDiscover({ type: e.target.value }));
 $('#dc-genre').addEventListener('change', (e) => setDiscover({ genre: e.target.value }));
 $('#dc-netflix').addEventListener('click', () => setDiscover({ netflix: !settings.get().discover.netflix }));
 
@@ -302,6 +318,7 @@ function renderForYou() {
   if (nf) rows = rows.filter((t) => t.netflix);
   const inLang = languageFilter();
   if (inLang) rows = rows.filter((t) => inLang.has(t.tconst));
+  rows = rows.filter(matchesKind);
   rows.sort((a, b) => Number(byId.get(b.tconst).shared) - Number(byId.get(a.tconst).shared)
     || finalScore(byId.get(b.tconst), b.rating) - finalScore(byId.get(a.tconst), a.rating));
   rows = rows.slice(0, FOR_YOU_SHOWN).map((t) => {

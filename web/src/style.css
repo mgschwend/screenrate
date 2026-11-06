@@ -225,13 +225,18 @@ button, input, select, .links a { min-height: 44px; }
 .foryou-bar #quick-rate { flex: 1 1 100%; }
 .chip.on { background: var(--bg3); }
 
-/* language filter */
-.lang-filter {
-  flex: none; width: 4.6rem; min-height: 44px; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px;
+/* shared filters */
+.filter-row { flex: none; display: flex; gap: .5rem; padding: 0 .8rem .6rem; border-bottom: 1px solid var(--line); }
+.filter-row select { flex: 1; width: auto; }
+.searchbar { border-bottom: 0; }
+.kind-filter { flex: none; width: 5.6rem; }
+.lang-filter { flex: none; width: 4.6rem; }
+.lang-filter, .kind-filter {
+  min-height: 44px; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px;
   padding: 0 .3rem; font-size: 16px;
 }
-.lang-filter.on { border-color: var(--accent); color: var(--accent); }
-.discover-row .lang-filter { flex: none; }
+.lang-filter.on, .kind-filter.on { border-color: var(--accent); color: var(--accent); }
+.discover-row .lang-filter, .discover-row .kind-filter { flex: none; }
 
 /* taste profile */
 .taste { flex: none; padding: 0 1rem; border-bottom: 1px solid var(--line); }
