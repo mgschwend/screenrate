@@ -9,7 +9,7 @@ const RUNTIME = 'screenrate-runtime';
 const RUNTIME_HOSTS = [/^image\.tmdb\.org$/];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(['./', ...ASSETS])).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(SHELL).then((c) => c.addAll([new Request('./', { cache: 'reload' }), ...ASSETS])).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
