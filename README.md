@@ -11,6 +11,7 @@ and running it on the VPS is in [deploy/README.md](deploy/README.md).
 - **Film database.** CI filters the IMDb datasets into a SQLite file (about 62k titles with at least 1000 votes, plus German titles), adds similar titles, and adds Netflix CH availability from TMDB/JustWatch. It runs nightly and on every push to `main`.
 - **On the device.** The app downloads that file after login and opens it with SQLite WASM, in memory. Search, detail pages and suggestions run there, so they're instant and work offline.
 - **On the server.** A small Node server with no dependencies, storing data in SQLite. It handles login, serves the database to logged-in users, stores ratings, watchlist and settings, and proxies TMDB so the key stays private.
+- **Discover.** Browses by quality: hidden gems, top rated and new, by type and genre, on Netflix CH by default.
 - **For you.** Runs on the device: titles similar to what you rated highly, minus what resembles what you rated low. "With Thomas" or "With Marc" combines both tastes and leaves out anything either has seen.
 
 ## Layout
