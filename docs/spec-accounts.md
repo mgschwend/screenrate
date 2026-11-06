@@ -4,7 +4,7 @@ Status: draft for discussion. Nothing here is built.
 
 ## Summary
 
-Move ScreenRate from GitHub Pages to the VPS as **one small Node server with one SQLite file behind Caddy**.
+Move ScreenRate from GitHub Pages to the trailmap staging VPS as **one small Node container with one SQLite file behind the Traefik that already runs there**.
 
 - Two hard-coded users, Marc and Thomas, each with a password. This replaces the shared database passphrase.
 - The film database stays on the device, so search stays instant and works offline.
@@ -20,7 +20,7 @@ Pages only serves static files, so it can't hold accounts or shared data. The ap
 
 | Option | Good | Bad | Verdict |
 |---|---|---|---|
-| **A. Everything on the VPS** | One place, plain SQLite file, no secrets in the browser, already paid for | You own updates, TLS and backups (mostly automated) | **Recommended** |
+| **A. Everything on the VPS** | One place, plain SQLite file, no secrets in the browser, already paid for, Traefik and Docker already there | Shares a box with trailmap staging; you own its backups | **Recommended** |
 | B. Cloudflare Worker + D1 + R2 | Free tier fits easily, no server to maintain | Three products to learn; password hashing is tight on the free plan | Good fallback if the VPS is weak |
 | C. Pages + API on the VPS | Keeps Pages | Two hosts, cross-site login cookies are fragile on iPhone [assumption], database stays public and encrypted | No |
 | D. PocketBase on the VPS | Login and storage out of the box | Gating the database file and proxying TMDB still need custom hooks; hook runtime and stability not confirmed | No |
@@ -33,17 +33,35 @@ Why not B by default: Workers cap PBKDF2 at 100,000 iterations, and one develope
 ```
 GitHub Actions (nightly, and on push to main)
   tests → build DB → similar → Netflix → gzip → upload to VPS
-                                                    │ ssh (deploy user)
-Phone / Mac ── HTTPS ── Caddy ── Node server ── app.sqlite (users' data)
-                                     ├── /srv/screenrate/web     app files
-                                     ├── /srv/screenrate/data    imdb.sqlite.gz
-                                     └── TMDB (key stays on the server)
+                                                    │ ssh (own restricted key)
+Phone / Mac ── HTTPS ── Traefik ── screenrate container ── app.sqlite (users' data)
+                (existing)              ├── /data/web              app files
+                                        ├── /data/imdb.sqlite.gz   film database
+                                        └── TMDB (key stays on the server)
 ```
 
 - **App files:** static and public. They contain no data and no secrets, so they don't need a login.
 - **Film database:** only downloadable with a valid session. HTTPS replaces the AES encryption, which is removed.
 - **Server:** Node with built-ins only (`node:http`, `node:sqlite`, `node:crypto`). `node:sqlite` is a release candidate in the current Node docs, so check it on the Node version we pick. Fallback is `better-sqlite3`.
-- **Process and TLS:** systemd keeps Node running. Caddy renews certificates by itself and needs a domain pointing at the VPS with ports 80 and 443 open.
+- **Process and TLS:** the VPS has no Node on the host, so the server runs as a Docker container. Traefik already handles ports 80 and 443 and gets certificates by itself. It only needs a domain pointing at the VPS.
+
+## The VPS
+
+Checked read-only on 2026-11-06 over SSH (`77.42.39.59`, serves `backend.staging.localtrails.ch`).
+
+| Item | Finding |
+|---|---|
+| Machine | Hetzner, Helsinki; Ubuntu 26.04, 2 CPUs, 3.7 GB RAM, no swap |
+| Free | 2.7 GB RAM available, 12 GB disk (67% used), load near 0 |
+| Running | Docker stack `trailmap-staging`: Traefik v3.7.5, webservice, Postgres, S3 database backup. Also a host Postgres 18 |
+| Routing | Traefik reads Docker labels (opt-in) and files in `dynamic/`. Certificates via Let's Encrypt HTTP challenge, resolver `le` |
+
+How ScreenRate fits in without touching trailmap:
+
+- **Own folder and compose file:** `/home/deploy/screenrate`, separate from `/home/deploy/staging`.
+- **Routing:** the container joins the existing `trailmap-staging_default` network and sets Traefik labels. Adding it needs no Traefik restart or trailmap file change [assumption, from Traefik's Docker provider setup].
+- **Limits:** a 256 MB memory cap, so it can't squeeze trailmap, and a 128 MiB scrypt run fits inside that with room for the server [assumption].
+- **Shared fate:** if Traefik restarts or the staging box is rebuilt, ScreenRate goes down with it. The app keeps working offline meanwhile, except for logins and syncing.
 
 ## Login
 
@@ -118,11 +136,10 @@ All of this runs on the device, using the film database plus your ratings.
 
 ## Deploy and operations
 
-- **Upload:** a restricted `deploy` SSH user that can only write to `/srv/screenrate`. The key is a GitHub secret. The database file is replaced in one atomic step.
-- **Server basics:** firewall allowing 22, 80 and 443, SSH keys only, automatic security updates.
-- **Backups:** a nightly SQLite backup, keeping 7 days, copied off the VPS. Ratings can be re-imported, but the watchlist and app ratings can't.
+- **Image:** CI builds the app and server into a Docker image on `ghcr.io`, like the trailmap webservice. It holds code only, never the film database.
+- **Upload:** ⚠ don't give CI the existing `deploy` login, because it has sudo and Docker, which equals root on the staging box, and this repo is public. Use a separate SSH key limited to one script that stores the new database and pulls the new image. The database file is replaced in one atomic step.
+- **Backups:** a nightly SQLite backup, keeping 7 days, copied to S3 under its own prefix. The existing trailmap backup covers Postgres only, so it doesn't include this. Ratings can be re-imported, but the watchlist and app ratings can't.
 - **Monitoring:** GitHub's failed-run email covers builds. A free uptime check is optional.
-- **Resources:** about 1 GB of RAM should be plenty, because the server only serves files and small queries [assumption].
 
 ## Licensing
 
@@ -134,9 +151,9 @@ Decision: Thomas is Marc's flatmate, so this counts as personal household use. T
 
 | Prod question | Answer |
 |---|---|
-| Expected outage | 0: the old site keeps running until the new one is confirmed |
-| Who is affected | Marc and Thomas. Each must add the new address to the Home Screen and log in once |
-| Rollback | Keep GitHub Pages running for two weeks, and go back to the old address |
+| Expected outage | 0 for ScreenRate: the old site keeps running until the new one is confirmed. 0 expected for trailmap staging, because nothing of it restarts |
+| Who is affected | Marc and Thomas. Each must add the new address to the Home Screen and log in once. Trailmap staging users: nobody |
+| Rollback | Keep GitHub Pages running for two weeks, and go back to the old address. On the VPS, `docker compose down` in the ScreenRate folder removes it all |
 | Rehearsed | Not yet. The new address is the rehearsal; test on the real iPhone before switching off Pages |
 
 ⚠ The watchlist is tied to the old address, so it won't move by itself. Add an "Export watchlist" button to the old app first, and an import in the new one.
@@ -145,7 +162,7 @@ After two stable weeks, turn off Pages, remove the encryption step, and delete t
 
 ## Build order
 
-1. **VPS base:** domain, Caddy, deploy user, app and database upload from CI.
+1. **VPS base:** domain, Docker image, compose file, Traefik labels, restricted upload key.
 2. **Login:** server, users, sessions, gated database download, TMDB proxy.
 3. **Personal data:** watchlist on the server, watchlist move, settings.
 4. **Ratings:** CSV import and rating marks.
@@ -156,10 +173,9 @@ Steps 1–3 replace what exists. Steps 4–5 are the new value.
 
 ## Open questions
 
-1. VPS details: provider, RAM, operating system, and what else runs on it.
-2. Which domain or subdomain to use.
-3. Should Marc and Thomas see each other's ratings? This is needed for Movie night.
-4. One real IMDb ratings CSV, to confirm the columns.
+1. Which domain or subdomain to use, as a plain DNS record pointing at the VPS.
+2. Should Marc and Thomas see each other's ratings? This is needed for Movie night.
+3. One real IMDb ratings CSV, to confirm the columns.
 
 ## Sources
 
@@ -170,5 +186,4 @@ Steps 1–3 replace what exists. Steps 4–5 are the new value.
 - [workerd issue on the PBKDF2 limit](https://github.com/cloudflare/workerd/issues/1346)
 - [Node.js `node:sqlite`](https://nodejs.org/api/sqlite.html)
 - [OWASP password storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
-- [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https)
 - [WebKit on storage limits](https://webkit.org/blog/10218/full-third-party-cookie-blocking-and-more/)
