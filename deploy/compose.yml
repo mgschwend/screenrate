@@ -1,0 +1,41 @@
+# ScreenRate on the shared VPS. Lives in /home/deploy/screenrate, separate from the trailmap stack;
+# it only joins that stack's network so its Traefik can reach this container.
+name: screenrate
+
+services:
+  app:
+    image: node:24-alpine
+    user: "1000:1000"
+    working_dir: /app/server
+    command: ["node", "--disable-warning=ExperimentalWarning", "index.js"]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 256m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    env_file: .env # TMDB_API_KEY
+    environment:
+      DATA_DIR: /data
+      WEB_DIR: /app/web
+    volumes:
+      - ./current:/app:ro
+      - ./data:/data
+    networks: [traefik]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: trailmap-staging_default
+      traefik.http.routers.screenrate.rule: Host(`ratings.localtrails.ch`)
+      traefik.http.routers.screenrate.entrypoints: websecure
+      traefik.http.routers.screenrate.tls.certresolver: le
+      traefik.http.services.screenrate.loadbalancer.server.port: "8080"
+
+networks:
+  traefik:
+    external: true
+    name: trailmap-staging_default

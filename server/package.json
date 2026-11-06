@@ -1,0 +1,10 @@
+{
+  "name": "screenrate-server",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test 'test/*.test.js'"
+  }
+}

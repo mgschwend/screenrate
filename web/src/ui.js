@@ -1,5 +1,5 @@
 // DOM rendering: result rows, watchlist, detail sheet with similar titles, toast.
-import { watchlist, settings } from './store.js';
+import { watchlist, ratings, shared } from './store.js';
 import { posterFor } from './tmdb.js';
 import { mergeRelated } from './related.js';
 
@@ -13,6 +13,8 @@ const fmtVotes = (v) => {
 };
 const typeLabel = (t) => TYPE_LABEL[t] || t || '';
 export const imdbUrl = (tconst) => `https://www.imdb.com/title/${tconst}/`;
+
+export const NEEDS_NET = 'That needs a connection';
 
 // ---------- toast ----------
 let toastTimer;
@@ -29,7 +31,8 @@ export function toast(msg, action) {
 function rowHtml(t) {
   const sub = [t.year, typeLabel(t.type)].filter(Boolean).join(' · ');
   return `<div class="t"><b>${t.netflix ? '<span class="nf" title="On Netflix">N</span>' : ''}${esc(t.title)}</b>
-      <small>${esc(sub)}${t.akaTitle ? ` · <i>${esc(t.akaTitle)}</i>` : ''}</small></div>
+      <small>${esc(sub)}${t.mine ? ` · <span class="mine">You ${t.mine}</span>` : ''}${t.akaTitle ? ` · <i>${esc(t.akaTitle)}</i>` : ''}</small>
+      ${t.why ? `<small class="why">${esc(t.why)}</small>` : ''}</div>
     <div class="r"><span class="rating">★ ${fmtRating(t.rating)}</span>${t.votes ? `<small>${fmtVotes(t.votes)}</small>` : ''}</div>
     <a class="imdb" href="${imdbUrl(t.tconst)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(t.title)} on IMDb">IMDb</a>`;
 }
@@ -51,20 +54,23 @@ function rowLi(t, onOpen) {
 }
 
 // ---------- watchlist ----------
-export function renderWatchlist(onOpen) {
-  const rows = watchlist.all();
+export function renderWatchlist(onOpen, lookup) {
+  const rows = lookup(watchlist.all());
   const ol = $('#watchlist');
   ol.innerHTML = '';
   $('#watchlist-empty').hidden = rows.length > 0;
   for (const w of rows) {
     const li = document.createElement('li');
     li.tabIndex = 0;
-    li.innerHTML = rowHtml(markNetflix(w));
+    li.innerHTML = rowHtml(w);
     li.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === li) onOpen(w); });
-    attachRemoveGestures(li, () => {
-      watchlist.remove(w.tconst);
-      renderWatchlist(onOpen);
-      toast(`Removed “${w.title}”`, { label: 'Undo', run: () => { watchlist.restore(w); renderWatchlist(onOpen); } });
+    attachRemoveGestures(li, async () => {
+      try { await watchlist.remove(w.tconst); } catch { renderWatchlist(onOpen, lookup); return toast(NEEDS_NET); }
+      renderWatchlist(onOpen, lookup);
+      toast(`Removed “${w.title}”`, { label: 'Undo', run: async () => {
+        await watchlist.add(w.tconst).catch(() => toast(NEEDS_NET));
+        renderWatchlist(onOpen, lookup);
+      } });
     }, () => onOpen(w));
     ol.append(li);
   }
@@ -125,14 +131,13 @@ function cardHtml(c) {
 }
 
 /**
- * Posters paint over a fixed-size frame, so nothing moves when they arrive. With a key the frame stays
- * blank until the answer is in (the title only shows when there is no poster); an image is added once
- * decoded, and fades in only if it had to be fetched.
+ * Posters paint over a fixed-size frame, so nothing moves when they arrive. The frame stays blank until
+ * the answer is in (the title only shows when there is no poster); an image is added once decoded, and
+ * fades in only if it had to be fetched.
  */
-function fillPosters(root) {
-  const hasKey = !!settings.get().tmdbKey;
+export function fillPosters(root) {
   for (const el of root.querySelectorAll('[data-poster]')) {
-    if (!hasKey || el.dataset.filled) continue;
+    if (el.dataset.filled) continue;
     el.dataset.filled = '1';
     el.classList.add('pending');
     const started = performance.now();
@@ -148,6 +153,8 @@ function fillPosters(root) {
   }
 }
 
+const cap = (s) => s[0].toUpperCase() + s.slice(1);
+const RATE_BUTTONS = Array.from({ length: 10 }, (_, i) => `<button type="button" data-rate="${i + 1}" aria-label="Rate ${i + 1} out of 10">${i + 1}</button>`).join('');
 const SHOWN = 10;
 const SKELETON = '<div class="card skel" aria-hidden="true"><div class="poster"></div><span><b></b></span></div>'.repeat(SHOWN);
 let relatedNetflixOnly = false; // kept while moving from title to title
@@ -179,7 +186,7 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
   sheetOnClose = onClose || null;
   const body = $('#sheet-body');
   const inWl = watchlist.has(title.tconst);
-  const live = !!settings.get().tmdbKey;
+  const live = navigator.onLine;
   const sub = [title.year, typeLabel(title.type),
     title.originalTitle && title.originalTitle !== title.title ? `“${title.originalTitle}”` : ''].filter(Boolean).join(' · ');
   body.innerHTML = `
@@ -195,6 +202,8 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
     </div>
     <div id="avail">${netflixHtml(netflix, live)}</div>
     <button type="button" class="wl-btn ${inWl ? 'on' : ''}">${inWl ? '✓ On watchlist' : '+ Add to watchlist'}</button>
+    <div class="rate"><h3>Your rating</h3><div class="rate-grid">${RATE_BUTTONS}</div>
+      ${shared.of(title.tconst).map((o) => `<p class="other-rating">${esc(cap(o.user))}: ${o.rating}/10</p>`).join('')}</div>
     <section id="related">
       <div class="related-head"><h3>More like this</h3>
         ${netflix?.on != null ? `<button type="button" class="chip" aria-pressed="false"><span class="nf">N</span>On Netflix</button>` : ''}</div>
@@ -202,11 +211,31 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
     </section>`;
 
   const btn = body.querySelector('.wl-btn');
-  btn.onclick = () => {
-    if (watchlist.has(title.tconst)) watchlist.remove(title.tconst); else watchlist.add(title);
+  btn.onclick = async () => {
+    try {
+      await (watchlist.has(title.tconst) ? watchlist.remove(title.tconst) : watchlist.add(title.tconst));
+    } catch { return toast(NEEDS_NET); }
     const on = watchlist.has(title.tconst);
     btn.classList.toggle('on', on);
     btn.textContent = on ? '✓ On watchlist' : '+ Add to watchlist';
+  };
+
+  const rateGrid = body.querySelector('.rate-grid');
+  const showRating = () => {
+    const mine = ratings.get(title.tconst);
+    for (const b of rateGrid.children) {
+      b.classList.toggle('on', Number(b.dataset.rate) === mine);
+      b.setAttribute('aria-pressed', String(Number(b.dataset.rate) === mine));
+    }
+  };
+  showRating();
+  rateGrid.onclick = async (e) => {
+    const value = Number(e.target.closest('[data-rate]')?.dataset.rate);
+    if (!value) return;
+    try {
+      await (ratings.get(title.tconst) === value ? ratings.clear(title.tconst) : ratings.set(title.tconst, value));
+    } catch { return toast(NEEDS_NET); }
+    showRating();
   };
 
   const wireCards = (root) => {
@@ -244,7 +273,7 @@ export function openSheet({ title, similar = [], recommend, netflix, providers, 
   const late = new Promise((done) => { setTimeout(done, 2500, []); });
   Promise.race([live && recommend ? recommend : [], late]).then((recs) => {
     if (!sec.isConnected) return;
-    all = mergeRelated(recs, similar, title.rating).map(markNetflix);
+    all = mergeRelated(recs, similar, title.rating).map(markNetflix).filter((t) => !t.mine);
     renderRelated();
   });
 

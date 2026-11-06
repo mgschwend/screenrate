@@ -114,6 +114,29 @@ export class TitleDb {
     } catch { return new Set(); }
   }
 
+  /** Similar ids only, best first: cheap enough to run over all of someone's ratings. */
+  similarIds(tconst) {
+    try {
+      const row = this.db.selectValue('SELECT others FROM similar WHERE id = ?', [Number(tconst.slice(2))]);
+      return row ? row.split(',').map((n) => `tt${n.padStart(7, '0')}`) : [];
+    } catch { return []; }
+  }
+
+  /** Rows for many ids, in no particular order. */
+  many(ids) {
+    const out = [];
+    for (let i = 0; i < ids.length; i += 500) {
+      const part = ids.slice(i, i + 500);
+      out.push(...this.db.selectObjects(`SELECT ${COLS} FROM titles t WHERE t.tconst IN (${part.map(() => '?').join(',')})`, part).map(plain));
+    }
+    return out;
+  }
+
+  /** Most-voted titles overall, for quick rating. */
+  popular(limit = 500) {
+    return this.db.selectObjects(`SELECT ${COLS} FROM titles t ORDER BY t.votes DESC LIMIT ?`, [limit]).map(plain);
+  }
+
   /** Most-voted titles on Netflix in `region`, for browsing without a search term. */
   netflixTop(region, limit = 50) {
     try {

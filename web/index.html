@@ -16,16 +16,18 @@
   <title>ScreenRate</title>
 </head>
 <body>
-  <!-- Boot / unlock -->
-  <section id="unlock" class="unlock" hidden>
+  <!-- Boot / login -->
+  <section id="login" class="unlock" hidden>
     <h1>Screen<span class="accent">Rate</span></h1>
-    <form id="unlock-form" autocomplete="off">
-      <label for="passphrase">Passphrase</label>
-      <input id="passphrase" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false" required>
-      <button type="submit" class="primary">Unlock</button>
+    <form id="login-form">
+      <label for="username">Username</label>
+      <input id="username" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required>
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <button type="submit" class="primary">Log in</button>
     </form>
-    <p id="unlock-status" class="muted" role="status"></p>
-    <progress id="unlock-progress" max="1" value="0" hidden></progress>
+    <p id="login-status" class="muted" role="status"></p>
+    <progress id="login-progress" max="1" value="0" hidden></progress>
     <p class="credit">Information courtesy of IMDb (<a href="https://www.imdb.com">https://www.imdb.com</a>). Used with permission.</p>
   </section>
 
@@ -45,6 +47,17 @@
         <p id="results-empty" class="empty" hidden></p>
       </section>
 
+      <section id="view-foryou" class="view" hidden>
+        <h2 class="view-title">For you</h2>
+        <div class="foryou-bar">
+          <button id="quick-rate" type="button">Rate films you know</button>
+          <button id="fy-netflix" type="button" class="chip" aria-pressed="false" hidden><span class="nf">N</span>On Netflix</button>
+          <button id="fy-together" type="button" class="chip" aria-pressed="false" hidden></button>
+        </div>
+        <ol id="foryou" class="list results"></ol>
+        <p id="foryou-empty" class="empty" hidden></p>
+      </section>
+
       <section id="view-watchlist" class="view" hidden>
         <h2 class="view-title">Watchlist</h2>
         <ol id="watchlist" class="list results"></ol>
@@ -54,8 +67,11 @@
       <section id="view-settings" class="view settings" hidden>
         <h2 class="view-title">Settings</h2>
         <div class="group">
-          <label for="tmdb-key">TMDB API key <span class="muted">(optional: posters + recommendations)</span></label>
-          <input id="tmdb-key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="v3 key or v4 read token">
+          <h3>Your ratings</h3>
+          <p class="muted hint">On IMDb, export your ratings as a CSV, then add the file here. Doing it again is safe.</p>
+          <label id="import-drop" class="file-button" for="import-file">Add IMDb CSV or watchlist file</label>
+          <input id="import-file" class="visually-hidden" type="file" accept=".csv,.json,text/csv,application/json">
+          <p id="import-status" class="muted hint" role="status"></p>
         </div>
         <div class="group row">
           <label for="region">Netflix country</label>
@@ -69,14 +85,15 @@
         </div>
         <div class="group buttons">
           <button id="clear-history" type="button">Clear recently opened</button>
-          <button id="lock" type="button" class="danger">Forget passphrase</button>
+          <button id="logout" type="button" class="danger">Log out</button>
         </div>
-        <p class="credit">Information courtesy of IMDb (<a href="https://www.imdb.com">https://www.imdb.com</a>). Used with permission. Personal, non-commercial use only. Streaming data: JustWatch (via TMDB). Posters and recommendations: TMDB; this product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+        <p class="credit">Information courtesy of IMDb (<a href="https://www.imdb.com">https://www.imdb.com</a>). Used with permission. Personal, non-commercial use only. Streaming data: JustWatch (via TMDB). Posters and recommendations: TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
       </section>
     </main>
 
     <nav class="tabs" aria-label="Sections">
       <button type="button" data-view="search" class="active">Search</button>
+      <button type="button" data-view="foryou">For you</button>
       <button type="button" data-view="watchlist">Watchlist</button>
       <button type="button" data-view="settings">Settings</button>
     </nav>
@@ -89,6 +106,19 @@
       <button type="button" class="sheet-close" data-close aria-label="Close">×</button>
       <div class="sheet-handle" data-close></div>
       <div id="sheet-body"></div>
+    </div>
+  </div>
+
+  <!-- Quick rating -->
+  <div id="quick" class="quick" hidden>
+    <div class="quick-top"><span id="quick-count" class="muted" role="status"></span><button id="quick-done" type="button">Done</button></div>
+    <div id="quick-card" class="quick-card"></div>
+    <div class="quick-buttons">
+      <button type="button" data-rate="3">Bad</button>
+      <button type="button" data-rate="6">OK</button>
+      <button type="button" data-rate="8">Good</button>
+      <button type="button" data-rate="10">Great</button>
+      <button type="button" data-rate="0" class="wide">Haven't seen it</button>
     </div>
   </div>
 

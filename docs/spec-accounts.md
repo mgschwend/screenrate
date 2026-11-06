@@ -149,9 +149,9 @@ All of this runs on the device, using the film database plus your ratings.
 
 ## Deploy and operations
 
-- **Image:** CI builds the app and server into a Docker image on `ghcr.io`, like the trailmap webservice. It holds code only, never the film database.
-- **Upload:** ⚠ don't give CI the existing `deploy` login, because it has sudo and Docker, which equals root on the staging box, and this repo is public. Use a separate SSH key limited to one script that stores the new database and pulls the new image. The database file is replaced in one atomic step.
-- **Backups:** a nightly SQLite backup, keeping 7 days, copied to S3 under its own prefix. The existing trailmap backup covers Postgres only, so it doesn't include this. Ratings can be re-imported, but the watchlist and app ratings can't.
+- **No image to build:** the stock `node:24-alpine` image runs the uploaded code, read-only, so there's no registry involved.
+- **Upload:** ⚠ don't give CI the existing `deploy` login, because it has sudo and Docker, which equals root on the staging box, and this repo is public. Use a separate SSH key limited to one script, `deploy/receive.sh`. CI pipes it a tar with the app, server and database. It swaps the new version in, and goes back to the previous one if the health check fails.
+- **Backups:** a nightly SQLite backup, keeping 7 days, kept in `data/backups/`. The existing trailmap backup covers Postgres only, so it doesn't include this. Copying them off the VPS is not built yet. Ratings can be re-imported, but the watchlist and app ratings can't.
 - **Monitoring:** GitHub's failed-run email covers builds. A free uptime check is optional.
 
 ## Licensing
@@ -175,7 +175,7 @@ After two stable weeks, turn off Pages, remove the encryption step, and delete t
 
 ## Build order
 
-1. **VPS base:** domain, Docker image, compose file, Traefik labels, restricted upload key.
+1. **VPS base:** domain, compose file, Traefik labels, restricted upload key.
 2. **Login:** server, users, sessions, gated database download, TMDB proxy.
 3. **Personal data:** watchlist on the server, watchlist move, settings.
 4. **Ratings:** CSV import and rating marks.

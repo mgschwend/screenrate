@@ -1,7 +1,7 @@
 // ScreenRate service worker (generated at build time by vite.config.js from sw-template.js).
 // - App shell: precached, cache-first (versioned per build).
 // - TMDB posters: runtime cache-first.
-// - imdb.sqlite.enc: NOT handled here; the app keeps it in its own Cache Storage entry ("Update data").
+// - /api and /data: NOT handled here; the app keeps the film database in its own Cache Storage entry.
 const VERSION = '__VERSION__';
 const ASSETS = __ASSETS__;
 const SHELL = `screenrate-shell-${VERSION}`;
@@ -25,9 +25,9 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
 
   if (url.origin === location.origin) {
-    if (url.pathname.endsWith('/imdb.sqlite.enc') || url.pathname.endsWith('/db-version.json')) return;
+    if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/data/')) return;
     if (req.mode === 'navigate') {
-      // no-cache: revalidate, or the browser reuses the page for up to 10 min (Pages max-age) after a deploy
+      // no-cache: revalidate, so a deploy shows up on the next open
       e.respondWith(fetch(req.url, { cache: 'no-cache' }).then((res) => {
         const copy = res.clone();
         caches.open(SHELL).then((c) => c.put('./', copy));

@@ -1,9 +1,11 @@
 import './style.css';
-import { openDatabase, forgetKey } from './dataload.js';
+import { api, LoginRequired } from './api.js';
+import { openDatabase, forgetDatabase } from './dataload.js';
+import { suggest, finalScore } from './foryou.js';
 import { searchTitles, MIN_CHARS } from './search.js';
-import { history, settings, posterCache } from './store.js';
+import { account, clearAccount, history, ratings, settings, shared, skipped, watchlist } from './store.js';
 import { recommendationsFor, providersFor } from './tmdb.js';
-import { $, toast, renderRows, renderWatchlist, openSheet, closeSheet, setNetflixMarker } from './ui.js';
+import { $, NEEDS_NET, fillPosters, toast, renderRows, renderWatchlist, openSheet, closeSheet, setNetflixMarker } from './ui.js';
 
 let tdb = null;
 let netflix = new Set();   // tconsts on Netflix in the chosen region (precomputed nightly)
@@ -20,10 +22,18 @@ function loadNetflix() {
   $('#nf-only').setAttribute('aria-pressed', String(nfOn));
   $('#nf-only').textContent = netflixRegion ? `N ${netflixRegion}` : 'N';
 }
-const mark = (t) => ({ ...t, netflix: netflix.has(t.tconst) });
+const mark = (t) => ({ ...t, netflix: netflix.has(t.tconst), mine: ratings.get(t.tconst) });
 setNetflixMarker(mark);
 
-// =============== boot / unlock ===============
+const capitalize = (s) => s[0].toUpperCase() + s.slice(1);
+
+/** Rows in the given order, with status marks; titles missing from the database are left out. */
+function rowsFor(items) {
+  const byId = new Map(tdb.many(items.map((i) => i.tconst)).map((t) => [t.tconst, t]));
+  return items.filter((i) => byId.has(i.tconst)).map((i) => mark({ ...byId.get(i.tconst), ...i }));
+}
+
+// =============== boot / login ===============
 async function boot() {
   registerServiceWorker();
   $('#boot-status').textContent = 'Opening database…';
@@ -31,36 +41,34 @@ async function boot() {
     tdb = await openDatabase();
     startApp();
   } catch (err) {
-    if (err.code === 'BAD_KEY') await forgetKey();
-    if (err.code === 'NO_KEY' || err.code === 'BAD_KEY') return showUnlock(err.code === 'BAD_KEY' ? 'Stored passphrase no longer works.' : '');
+    if (err instanceof LoginRequired) return showLogin();
     $('#boot-status').textContent = `Could not open database: ${err.message}`;
   }
 }
 
-function showUnlock(msg) {
+function showLogin(msg = '') {
   $('#boot').hidden = true;
-  $('#unlock').hidden = false;
-  $('#unlock-status').textContent = msg;
-  $('#passphrase').focus();
+  $('#app').hidden = true;
+  $('#login').hidden = false;
+  $('#login-status').textContent = msg;
+  $('#username').focus();
 }
 
-$('#unlock-form').addEventListener('submit', async (e) => {
+$('#login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const pass = $('#passphrase').value.trim();
-  const btn = e.submitter || $('#unlock-form button');
-  const prog = $('#unlock-progress');
+  const btn = e.submitter || $('#login-form button');
+  const prog = $('#login-progress');
   btn.disabled = true;
-  $('#unlock-status').textContent = 'Downloading and decrypting…';
+  $('#login-status').textContent = 'Logging in…';
   try {
-    tdb = await openDatabase({
-      passphrase: pass,
-      onProgress: (got, total) => { prog.hidden = false; prog.value = total ? got / total : 0; },
-    });
-    $('#passphrase').value = '';
-    $('#unlock').hidden = true;
+    await api.login($('#username').value, $('#password').value);
+    $('#password').value = '';
+    $('#login-status').textContent = 'Loading the film database…';
+    tdb = tdb || await openDatabase({ onProgress: (got, total) => { prog.hidden = false; prog.value = total ? got / total : 0; } });
+    $('#login').hidden = true;
     startApp();
   } catch (err) {
-    $('#unlock-status').textContent = err.code === 'BAD_KEY' ? 'Wrong passphrase.' : `Failed: ${err.message}`;
+    $('#login-status').textContent = err.status === 401 || err.status === 429 ? err.message : `Failed: ${err.message}`;
   } finally {
     btn.disabled = false;
     prog.hidden = true;
@@ -73,26 +81,42 @@ function startApp() {
   loadNetflix();
   showResults();
   renderSettings();
+  syncAccount();
   checkForNewData();
   if (matchMedia('(hover: hover) and (min-width: 700px)').matches) $('#q').focus();
 }
 
-/** CI publishes db-version.json next to the DB; re-download quietly when it differs from the cached DB. */
+/** Refresh the local copy of everything personal. Offline just keeps the last copy. */
+async function syncAccount() {
+  try {
+    const me = await api.me();
+    account.set(me);
+    await Promise.all([ratings.sync(), shared.sync(), watchlist.sync(), settings.sync()]);
+    loadNetflix();
+    renderSettings();
+    if (!$('#view-search').hidden) showResults();
+    if (!$('#view-watchlist').hidden) renderWatchlist(openTitle, rowsFor);
+    if (!$('#view-foryou').hidden) renderForYou();
+  } catch (err) {
+    if (err instanceof LoginRequired) showLogin('Please log in again.');
+  }
+}
+
+/** The server publishes a version next to the database; re-download quietly when it differs. */
 async function checkForNewData() {
   try {
-    const res = await fetch(new URL('db-version.json', document.baseURI), { cache: 'no-store' });
-    if (!res.ok) { if (!tdb.hasSimilar()) refreshData({ quiet: true }); return; }
-    const { built_at: remote } = await res.json();
+    const { built_at: remote } = await api.version();
     if (remote && remote !== tdb.meta().built_at) refreshData({ quiet: true });
-  } catch { /* offline: keep the cached DB */ }
+  } catch { /* offline or logged out: keep the cached DB */ }
 }
 
 // =============== tabs ===============
 function showView(name) {
   for (const x of document.querySelectorAll('.tabs button')) x.classList.toggle('active', x.dataset.view === name);
   for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== `view-${name}`;
-  if (name === 'watchlist') renderWatchlist(openTitle);
+  if (name === 'watchlist') renderWatchlist(openTitle, rowsFor);
   if (name === 'settings') renderSettings();
+  if (name === 'foryou') renderForYou();
 }
 for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => showView(b.dataset.view));
 
@@ -156,21 +180,109 @@ function openTitle(t) {
     providers: providersFor(title.tconst, netflixRegion || settings.get().region),
     recommend: recommendationsFor(tdb, title.tconst, 20),
     onOpen: openTitle,
-    onClose: () => { if (!q.value.trim()) showResults(); if (!$('#view-watchlist').hidden) renderWatchlist(openTitle); },
+    onClose: () => {
+      if (!$('#view-search').hidden && !q.value.trim()) showResults();
+      if (!$('#view-watchlist').hidden) renderWatchlist(openTitle, rowsFor);
+      if (!$('#view-foryou').hidden) renderForYou();
+    },
   });
 }
+
+// =============== for you ===============
+const FOR_YOU_SHOWN = 40;
+
+function renderForYou() {
+  const s = settings.get();
+  const others = shared.all();
+  const together = s.withOthers && others.length > 0;
+  const nf = !!netflixRegion && s.forYouNetflix;
+  const nfBtn = $('#fy-netflix'), togetherBtn = $('#fy-together');
+  nfBtn.hidden = !netflixRegion;
+  nfBtn.classList.toggle('on', nf);
+  nfBtn.setAttribute('aria-pressed', String(nf));
+  togetherBtn.hidden = others.length === 0;
+  togetherBtn.classList.toggle('on', together);
+  togetherBtn.setAttribute('aria-pressed', String(together));
+  if (others.length) togetherBtn.textContent = `With ${others.map((o) => capitalize(o.user)).join(', ')}`;
+
+  const people = [{ name: account.get()?.user || 'me', rated: ratings.all() },
+    ...(together ? others.map((o) => ({ name: o.user, rated: o.ratings })) : [])];
+  const found = suggest(people, (id) => tdb.similarIds(id));
+  const byId = new Map(found.map((f) => [f.tconst, f]));
+  const titles = new Map(tdb.many(found.map((f) => f.tconst)).map((t) => [t.tconst, t]));
+  const seedNames = new Map(tdb.many([...new Set(found.map((f) => f.seed))]).map((t) => [t.tconst, t.title]));
+
+  let rows = found.filter((f) => titles.has(f.tconst)).map((f) => mark(titles.get(f.tconst)));
+  if (nf) rows = rows.filter((t) => t.netflix);
+  rows.sort((a, b) => Number(byId.get(b.tconst).shared) - Number(byId.get(a.tconst).shared)
+    || finalScore(byId.get(b.tconst), b.rating) - finalScore(byId.get(a.tconst), a.rating));
+  rows = rows.slice(0, FOR_YOU_SHOWN).map((t) => {
+    const f = byId.get(t.tconst);
+    const seed = seedNames.get(f.seed);
+    const who = together ? `${capitalize(f.name)} liked` : 'You liked';
+    return { ...t, why: seed ? `${f.shared && together ? 'For both of you · ' : ''}${who} ${seed}` : '' };
+  });
+  renderRows($('#foryou'), rows, openTitle);
+
+  const empty = $('#foryou-empty');
+  empty.hidden = rows.length > 0;
+  empty.textContent = ratings.count() < 3
+    ? 'Rate a few films you know, and suggestions appear here.'
+    : nf ? 'Nothing on Netflix fits yet. Turn off the filter or rate more films.' : 'Nothing to suggest yet. Rate more films you liked.';
+}
+
+$('#fy-netflix').addEventListener('click', () => { settings.set({ forYouNetflix: !settings.get().forYouNetflix }); renderForYou(); });
+$('#fy-together').addEventListener('click', () => { settings.set({ withOthers: !settings.get().withOthers }); renderForYou(); });
+
+// quick rating: one title at a time, most popular first
+let quickQueue = [], quickDone = 0;
+
+function showQuickCard() {
+  const t = quickQueue[0];
+  $('#quick-count').textContent = `${quickDone} rated`;
+  const card = $('#quick-card');
+  if (!t) { card.innerHTML = '<p>That was the whole list.</p>'; return; }
+  card.innerHTML = '<div class="poster"></div><h2></h2><p></p>';
+  const poster = card.querySelector('.poster');
+  poster.dataset.poster = t.tconst;
+  poster.textContent = t.title;
+  card.querySelector('h2').textContent = t.title;
+  card.querySelector('p').textContent = [t.year, `★ ${Number(t.rating).toFixed(1)}`].filter(Boolean).join(' · ');
+  fillPosters(card);
+}
+
+$('#quick-rate').addEventListener('click', () => {
+  const pass = skipped.all(), rated = ratings.all();
+  quickQueue = tdb.popular().filter((t) => !pass.has(t.tconst) && !rated[t.tconst]);
+  quickDone = 0;
+  $('#quick').hidden = false;
+  showQuickCard();
+});
+$('#quick-done').addEventListener('click', () => { $('#quick').hidden = true; renderForYou(); });
+document.querySelector('.quick-buttons').addEventListener('click', async (e) => {
+  const button = e.target.closest('[data-rate]');
+  const t = quickQueue[0];
+  if (!button || !t) return;
+  const value = Number(button.dataset.rate);
+  if (value) {
+    try { await ratings.set(t.tconst, value); } catch { return toast(NEEDS_NET); }
+    quickDone += 1;
+  } else skipped.add(t.tconst);
+  quickQueue.shift();
+  showQuickCard();
+});
 
 // =============== settings ===============
 function renderSettings() {
   const s = settings.get();
-  $('#tmdb-key').value = s.tmdbKey;
   if (tdb) {
     const m = tdb.meta();
     const built = m.built_at ? new Date(m.built_at.replace(' ', 'T') + 'Z').toLocaleString('de-CH') : '–';
     const num = (v) => (v ? Number(v).toLocaleString('de-CH') : '–');
-    $('#stats').innerHTML = `<dt>Built</dt><dd>${built}</dd><dt>Titles</dt><dd>${num(m.title_count)}</dd>
+    $('#stats').innerHTML = `<dt>Logged in</dt><dd>${account.get()?.user ? capitalize(account.get().user) : '–'}</dd>
+      <dt>Your ratings</dt><dd>${num(ratings.count())}</dd>
+      <dt>Built</dt><dd>${built}</dd><dt>Titles</dt><dd>${num(m.title_count)}</dd>
       <dt>DE/CH/AT titles</dt><dd>${num(m.aka_count)}</dd><dt>Similar lists</dt><dd>${num(m.similar_count)}</dd>
-      <dt>Min. votes</dt><dd>${m.min_votes ?? '–'}</dd>
       <dt>Netflix</dt><dd>${netflixRegion ? `${num(m[`netflix_${netflixRegion}_count`])} titles in ${netflixRegion}` : 'no data yet'}</dd>`;
     const regions = tdb.netflixRegions();
     const sel = $('#region');
@@ -180,11 +292,48 @@ function renderSettings() {
   $('#clear-history').textContent = `Clear recently opened (${history.all().length})`;
 }
 
-$('#tmdb-key').addEventListener('change', (e) => { settings.set({ tmdbKey: e.target.value.trim() }); posterCache.clear(); toast('Saved'); });
 $('#region').addEventListener('change', (e) => { settings.set({ region: e.target.value }); loadNetflix(); renderSettings(); showResults(); });
 $('#clear-history').addEventListener('click', () => { history.clear(); renderSettings(); showResults(); toast('Cleared'); });
-$('#lock').addEventListener('click', async () => { await forgetKey(); location.reload(); });
 $('#update-data').addEventListener('click', () => refreshData({ quiet: false }));
+$('#logout').addEventListener('click', async () => {
+  try { await api.logout(); } catch { return toast(NEEDS_NET); }
+  clearAccount();
+  await forgetDatabase();
+  location.reload();
+});
+
+// ---- import: IMDb ratings CSV, or the watchlist file from the old app ----
+async function importFile(file) {
+  const status = $('#import-status');
+  status.textContent = `Reading ${file.name}…`;
+  try {
+    const text = await file.text();
+    if (file.name.endsWith('.json') || text.trimStart().startsWith('[')) {
+      const { rows, added } = await api.importWatchlist(JSON.parse(text));
+      await watchlist.sync();
+      status.textContent = `Watchlist: ${added} added, ${rows - added} already there.`;
+    } else {
+      const { rows, skipped: bad } = await api.importRatings(text);
+      await ratings.sync();
+      const known = tdb.many(Object.keys(ratings.all())).length;
+      const missing = ratings.count() - known;
+      status.textContent = `${rows.toLocaleString('de-CH')} rating${rows === 1 ? '' : 's'} read`
+        + `${bad ? `, ${bad} unreadable` : ''}${missing ? `, ${missing} not in the film database` : ''}.`;
+    }
+    renderSettings();
+  } catch (err) {
+    status.textContent = err instanceof LoginRequired ? 'Please log in again.' : `Import failed: ${err.message}`;
+  }
+}
+
+$('#import-file').addEventListener('change', (e) => {
+  if (e.target.files[0]) importFile(e.target.files[0]);
+  e.target.value = '';
+});
+const drop = $('#import-drop');
+for (const type of ['dragenter', 'dragover']) drop.addEventListener(type, (e) => { e.preventDefault(); drop.classList.add('over'); });
+for (const type of ['dragleave', 'drop']) drop.addEventListener(type, () => drop.classList.remove('over'));
+drop.addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.files[0]) importFile(e.dataTransfer.files[0]); });
 
 async function refreshData({ quiet }) {
   const btn = $('#update-data'), prog = $('#update-progress');
@@ -198,6 +347,7 @@ async function refreshData({ quiet }) {
     showResults();
     if (!quiet) toast('Data updated');
   } catch (err) {
+    if (err instanceof LoginRequired) return showLogin('Please log in again.');
     if (!quiet) toast(`Update failed: ${err.message}`);
   } finally {
     btn.disabled = false; btn.textContent = 'Update data'; prog.hidden = true;
