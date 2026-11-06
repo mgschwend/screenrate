@@ -58,6 +58,18 @@ jobs:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: python scripts/add_netflix.py "$RUNNER_TEMP/imdb.sqlite" --regions CH --map-cache .tmdb_imdb_map.json
 
+      - name: Cache TMDB languages
+        uses: actions/cache@v6
+        with:
+          path: .tmdb_lang_cache.json
+          key: tmdb-lang-${{ github.run_id }}
+          restore-keys: tmdb-lang-
+
+      - name: Add original languages (TMDB)
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: python scripts/add_languages.py "$RUNNER_TEMP/imdb.sqlite" --cache .tmdb_lang_cache.json
+
       - name: Build web app
         run: npm run build
         working-directory: web

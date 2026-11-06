@@ -182,6 +182,10 @@ function netflixHtml(netflix, live) {
 let markNetflix = (t) => t;
 export function setNetflixMarker(fn) { markNetflix = fn; }
 
+function languageName(code) {
+  try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; } catch { return code; }
+}
+
 function contextHtml(c) {
   if (!c) return '';
   return `<p class="rating-context">${c.pct <= 50 ? `Top ${c.pct}%` : 'Lower half'} of ${esc(c.genre)} ${esc(c.kind)}</p>`;
@@ -199,7 +203,8 @@ export function openSheet({ title, context, similar = [], recommend, netflix, pr
     <div class="detail-head">
       <div class="ph" data-poster="${esc(title.tconst)}"></div>
       <div><h2 id="sheet-title">${esc(title.title)}</h2><p class="sub">${esc(sub)}</p>
-        ${title.genres ? `<p class="sub genres">${esc(title.genres.replaceAll(',', ' · '))}</p>` : ''}</div>
+        ${title.genres ? `<p class="sub genres">${esc(title.genres.replaceAll(',', ' · '))}</p>` : ''}
+        ${title.lang ? `<p class="sub">Original language: ${esc(languageName(title.lang))}</p>` : ''}</div>
     </div>
     <div class="big-rating"><span class="rating">★ ${fmtRating(title.rating)}</span><small>${Number(title.votes).toLocaleString('de-CH')} votes on IMDb</small></div>
     ${contextHtml(context)}

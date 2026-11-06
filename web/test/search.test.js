@@ -51,7 +51,11 @@ before(async () => {
       ('tt8000005', 'movie', 'Qqq Toon', 'Qqq Toon', 2001, 8.5, 90000, 'qqq toon', 'qqq toon', 'Animation');
     CREATE TABLE title_people (id INTEGER PRIMARY KEY, people TEXT NOT NULL);
     INSERT INTO title_people VALUES (903747, 'd0,a1'); INSERT INTO people VALUES (1, 'Bryan Cranston');
-    INSERT INTO netflix VALUES ('XX', 8000001);`);
+    INSERT INTO netflix VALUES ('XX', 8000001);
+    ALTER TABLE titles ADD COLUMN lang TEXT;
+    UPDATE titles SET lang = 'fr' WHERE tconst IN ('tt0211915', 'tt8000002');
+    UPDATE titles SET lang = 'en' WHERE tconst = 'tt8000001';
+    INSERT INTO meta VALUES ('lang_count', '3');`);
   tdb = new TitleDb(db);
 });
 
@@ -100,6 +104,15 @@ test('Discover: modes, filters and Netflix', () => {
   assert.ok(!ids2({ mode: 'top', genre: 'Drama' }).includes('tt1160419'));
   assert.deepEqual(ids2({ mode: 'new' }), ['tt15239678', 'tt8000001']); // 2024 and 2025, best first
   assert.deepEqual(tdb.genres(), ['Action', 'Adventure', 'Animation', 'Crime', 'Drama']);
+});
+
+test('original language filter', () => {
+  assert.ok(tdb.hasLanguages());
+  assert.deepEqual([...tdb.languageSet(['fr'])].sort(), ['tt0211915', 'tt8000002']);
+  assert.equal(tdb.languageSet(['en', 'fr']).size, 3);
+  assert.equal(tdb.get('tt0211915').lang, 'fr');
+  assert.deepEqual(tdb.discover({ mode: 'gems', langs: ['en'], year: 2026 }).map((t) => t.tconst), ['tt8000001']);
+  assert.deepEqual(tdb.discover({ mode: 'top', langs: ['fr'], year: 2026 }).map((t) => t.tconst), ['tt0211915']);
 });
 
 test('rating context picks a big enough genre', () => {

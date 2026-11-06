@@ -40,6 +40,7 @@
         <form id="search-form" class="searchbar" role="search" autocomplete="off">
           <input id="q" type="search" placeholder="Film or series title…" enterkeyhint="search"
                  autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Search titles">
+          <select class="lang-filter" aria-label="Original language" hidden></select>
           <button id="nf-only" type="button" class="nf-toggle" aria-label="Only titles on Netflix" aria-pressed="false" hidden>N</button>
         </form>
         <h3 id="list-head" class="list-head">Recently opened</h3>
@@ -53,6 +54,7 @@
           <button id="quick-rate" type="button">Rate films you know</button>
           <button id="fy-netflix" type="button" class="chip" aria-pressed="false" hidden><span class="nf">N</span>On Netflix</button>
           <button id="fy-together" type="button" class="chip" aria-pressed="false" hidden></button>
+          <select class="lang-filter" aria-label="Original language" hidden></select>
         </div>
         <details id="taste" class="taste" hidden>
           <summary>Your taste</summary>
@@ -75,6 +77,7 @@
               <option value="">All types</option><option value="film">Films</option><option value="series">Series</option>
             </select>
             <select id="dc-genre" aria-label="Genre"></select>
+            <select class="lang-filter" aria-label="Original language" hidden></select>
             <button id="dc-netflix" type="button" class="chip" aria-pressed="false" hidden><span class="nf">N</span>Netflix</button>
           </div>
         </div>

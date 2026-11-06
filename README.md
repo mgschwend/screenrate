@@ -20,6 +20,7 @@ and running it on the VPS is in [deploy/README.md](deploy/README.md).
 scripts/build_imdb_db.py   IMDb datasets → imdb.sqlite
 scripts/add_similar.py     genres, similar titles and why they match
 scripts/add_netflix.py     Netflix availability per region
+scripts/add_languages.py   original language per title
 server/                    Node server (app.js routes, auth.js, store.js, csv.js, tmdb.js)
 server/set-password.js     set or change a password
 web/                       the PWA (Vite, vanilla JS)

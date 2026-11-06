@@ -54,6 +54,7 @@ export class TitleDb {
     if (!r) return null;
     const out = plain(r);
     try { out.genres = this.db.selectValue('SELECT genres FROM titles WHERE tconst = ?', [tconst]) || ''; } catch { /* old DB */ }
+    try { out.lang = this.db.selectValue('SELECT lang FROM titles WHERE tconst = ?', [tconst]) || ''; } catch { /* old DB */ }
     return out;
   }
 
@@ -137,6 +138,14 @@ export class TitleDb {
     return this.db.selectObjects(`SELECT ${COLS} FROM titles t ORDER BY t.votes DESC LIMIT ?`, [limit]).map(plain);
   }
 
+  /** True once the build has stored original languages. */
+  hasLanguages() { return Number(this.meta().lang_count || 0) > 0; }
+
+  /** Set of tconsts whose original language is one of `codes`. */
+  languageSet(codes) {
+    return new Set(this.db.selectValues(`SELECT tconst FROM titles WHERE lang IN (${codes.map(() => '?').join(',')})`, codes));
+  }
+
   /** Every genre in the database, A to Z. */
   genres() {
     try {
@@ -196,10 +205,10 @@ export class TitleDb {
   /**
    * Browse by quality rather than by name.
    * mode: 'gems' well rated but not widely known | 'top' best rated with many votes | 'new' recent and good
-   * type: '' | 'film' | 'series'; genre: '' or an IMDb genre; region: only titles on Netflix there
+   * type: '' | 'film' | 'series'; genre: '' or an IMDb genre; langs: original languages; region: only titles on Netflix there
    * Best first, by rating; `year` is passed in so "recent" is testable.
    */
-  discover({ mode = 'gems', type = '', genre = '', region = null, limit = 300, year = new Date().getFullYear() } = {}) {
+  discover({ mode = 'gems', type = '', genre = '', langs = [], region = null, limit = 300, year = new Date().getFullYear() } = {}) {
     const where = [], args = [];
     if (region) args.push(region);
     if (mode === 'gems') {
@@ -211,6 +220,7 @@ export class TitleDb {
     if (type === 'film') where.push("t.type = 'movie'");
     if (type === 'series') where.push("t.type != 'movie'");
     if (genre) { where.push("(',' || t.genres || ',') LIKE ?"); args.push(`%,${genre},%`); }
+    if (langs.length) { where.push(`t.lang IN (${langs.map(() => '?').join(',')})`); args.push(...langs); }
     const join = region ? "JOIN netflix n ON t.tconst = 'tt' || printf('%07d', n.id) AND n.region = ?" : '';
     const rows = this.db.selectObjects(`SELECT ${COLS} FROM titles t ${join} WHERE ${where.join(' AND ')}
       ORDER BY t.rating DESC, t.votes DESC LIMIT ?`, [...args, mode === 'gems' ? Math.max(limit, 2000) : limit]).map(plain);

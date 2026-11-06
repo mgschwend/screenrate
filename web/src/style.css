@@ -225,6 +225,14 @@ button, input, select, .links a { min-height: 44px; }
 .foryou-bar #quick-rate { flex: 1 1 100%; }
 .chip.on { background: var(--bg3); }
 
+/* language filter */
+.lang-filter {
+  flex: none; width: 4.6rem; min-height: 44px; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 0 .3rem; font-size: 16px;
+}
+.lang-filter.on { border-color: var(--accent); color: var(--accent); }
+.discover-row .lang-filter { flex: none; }
+
 /* taste profile */
 .taste { flex: none; padding: 0 1rem; border-bottom: 1px solid var(--line); }
 .taste summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 600; }

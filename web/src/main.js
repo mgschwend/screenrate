@@ -22,11 +22,47 @@ function loadNetflix() {
   $('#nf-only').classList.toggle('on', nfOn);
   $('#nf-only').setAttribute('aria-pressed', String(nfOn));
   $('#nf-only').textContent = netflixRegion ? `N ${netflixRegion}` : 'N';
+  langKey = null;
+  renderLanguageFilters();
 }
 const mark = (t) => ({ ...t, netflix: netflix.has(t.tconst), mine: ratings.get(t.tconst) });
 setNetflixMarker(mark);
 
 const capitalize = (s) => s[0].toUpperCase() + s.slice(1);
+
+// ---- original language: one filter shared by search, Discover and For you ----
+const LANGUAGES = [['', 'All'], ['en', 'EN'], ['fr', 'FR'], ['es', 'ES'], ['en,fr,es', 'E F S']];
+let langKey = null, langSet = null;
+
+/** Titles in the chosen language(s), or null when there's no filter. Cached until the choice or database changes. */
+function languageFilter() {
+  const chosen = tdb.hasLanguages() ? settings.get().language : '';
+  if (!chosen) return null;
+  if (chosen !== langKey) { langKey = chosen; langSet = tdb.languageSet(chosen.split(',')); }
+  return langSet;
+}
+const chosenLangs = () => (tdb.hasLanguages() && settings.get().language ? settings.get().language.split(',') : []);
+const languageLabel = () => (chosenLangs().length ? ` in ${chosenLangs().map((c) => new Intl.DisplayNames(['en'], { type: 'language' }).of(c)).join(', ')}` : '');
+
+function renderLanguageFilters() {
+  const on = tdb.hasLanguages();
+  const value = settings.get().language;
+  for (const sel of document.querySelectorAll('.lang-filter')) {
+    if (!sel.options.length) sel.innerHTML = LANGUAGES.map(([v, label]) => `<option value="${v}">${label}</option>`).join('');
+    sel.hidden = !on;
+    sel.value = value;
+    sel.classList.toggle('on', !!value);
+  }
+}
+for (const sel of document.querySelectorAll('.lang-filter')) {
+  sel.addEventListener('change', (e) => {
+    settings.set({ language: e.target.value });
+    renderLanguageFilters();
+    if (!$('#view-search').hidden) showResults();
+    if (!$('#view-discover').hidden) renderDiscover();
+    if (!$('#view-foryou').hidden) renderForYou();
+  });
+}
 
 /** Rows in the given order, with status marks; titles missing from the database are left out. */
 function rowsFor(items) {
@@ -133,11 +169,15 @@ function showResults() {
   const text = q.value.trim();
   const list = $('#results'), empty = $('#results-empty');
   const nfOnly = !!netflixRegion && settings.get().netflixOnly;
+  const inLang = languageFilter();
+  const keep = (r) => !inLang || inLang.has(r.tconst);
   if (text.replace(/\s/g, '').length < MIN_CHARS && nfOnly) {
+    const rows = tdb.netflixTop(netflixRegion, inLang ? 6000 : 50).filter(keep).slice(0, 50);
     $('#list-head').hidden = false;
-    $('#list-head').textContent = `Most popular on Netflix ${netflixRegion}`;
-    renderRows(list, tdb.netflixTop(netflixRegion).map(mark), openTitle);
-    empty.hidden = true;
+    $('#list-head').textContent = `Most popular on Netflix ${netflixRegion}${languageLabel()}`;
+    renderRows(list, rows.map(mark), openTitle);
+    empty.hidden = rows.length > 0;
+    empty.textContent = 'Nothing on Netflix in that language.';
     return;
   }
   if (text.replace(/\s/g, '').length < MIN_CHARS) {
@@ -149,15 +189,17 @@ function showResults() {
     empty.textContent = 'Type a film or series title — results appear as you type.';
     return;
   }
-  let rows = searchTitles(tdb, text, nfOnly ? 5000 : 30, { wide: nfOnly }).map(mark);
-  if (nfOnly) rows = rows.filter((r) => r.netflix).slice(0, 30);
+  const filtered = nfOnly || !!inLang;
+  let rows = searchTitles(tdb, text, filtered ? 5000 : 30, { wide: filtered }).map(mark);
+  if (filtered) rows = rows.filter((r) => (!nfOnly || r.netflix) && keep(r)).slice(0, 30);
   $('#list-head').hidden = false;
   $('#list-head').textContent = (rows.length ? `${rows.length}${rows.length === 30 ? '+' : ''} result${rows.length === 1 ? '' : 's'}` : 'No results')
-    + (nfOnly ? ` on Netflix ${netflixRegion}` : '');
+    + (nfOnly ? ` on Netflix ${netflixRegion}` : '') + languageLabel();
   renderRows(list, rows, openTitle);
   list.scrollTop = 0;
   empty.hidden = rows.length > 0;
-  empty.textContent = nfOnly ? `Nothing on Netflix ${netflixRegion} for “${text}”. Tap “N” to show everything.` : `Nothing found for “${text}”.`;
+  empty.textContent = nfOnly ? `Nothing on Netflix ${netflixRegion} for “${text}”${languageLabel()}. Tap “N” to show everything.`
+    : `Nothing found for “${text}”${languageLabel()}.`;
 }
 
 $('#nf-only').addEventListener('click', () => {
@@ -216,14 +258,14 @@ function renderDiscover() {
   nfBtn.setAttribute('aria-pressed', String(nf));
 
   const rated = ratings.all();
-  const rows = tdb.discover({ mode: d.mode, type: d.type, genre: d.genre, region: nf ? netflixRegion : null })
+  const rows = tdb.discover({ mode: d.mode, type: d.type, genre: d.genre, langs: chosenLangs(), region: nf ? netflixRegion : null })
     .filter((t) => !rated[t.tconst]).slice(0, DISCOVER_SHOWN).map(mark);
-  $('#dc-head').textContent = `${MODE_LABEL[d.mode]}${nf ? ` on Netflix ${netflixRegion}` : ''}`;
+  $('#dc-head').textContent = `${MODE_LABEL[d.mode]}${nf ? ` on Netflix ${netflixRegion}` : ''}${languageLabel()}`;
   renderRows($('#discover'), rows, openTitle);
   $('#discover').scrollTop = 0;
   const empty = $('#discover-empty');
   empty.hidden = rows.length > 0;
-  empty.textContent = 'Nothing matches. Try another genre, or turn off Netflix.';
+  empty.textContent = 'Nothing matches. Try another genre or language, or turn off Netflix.';
 }
 
 const setDiscover = (patch) => { settings.set({ discover: { ...settings.get().discover, ...patch } }); renderDiscover(); };
@@ -258,6 +300,8 @@ function renderForYou() {
 
   let rows = found.filter((f) => titles.has(f.tconst)).map((f) => mark(titles.get(f.tconst)));
   if (nf) rows = rows.filter((t) => t.netflix);
+  const inLang = languageFilter();
+  if (inLang) rows = rows.filter((t) => inLang.has(t.tconst));
   rows.sort((a, b) => Number(byId.get(b.tconst).shared) - Number(byId.get(a.tconst).shared)
     || finalScore(byId.get(b.tconst), b.rating) - finalScore(byId.get(a.tconst), a.rating));
   rows = rows.slice(0, FOR_YOU_SHOWN).map((t) => {
@@ -343,7 +387,8 @@ function renderSettings() {
       <dt>Your ratings</dt><dd>${num(ratings.count())}</dd>
       <dt>Built</dt><dd>${built}</dd><dt>Titles</dt><dd>${num(m.title_count)}</dd>
       <dt>DE/CH/AT titles</dt><dd>${num(m.aka_count)}</dd><dt>Similar lists</dt><dd>${num(m.similar_count)}</dd>
-      <dt>Netflix</dt><dd>${netflixRegion ? `${num(m[`netflix_${netflixRegion}_count`])} titles in ${netflixRegion}` : 'no data yet'}</dd>`;
+      <dt>Netflix</dt><dd>${netflixRegion ? `${num(m[`netflix_${netflixRegion}_count`])} titles in ${netflixRegion}` : 'no data yet'}</dd>
+      <dt>Languages</dt><dd>${m.lang_count ? `${num(m.lang_count)} of ${num(m.title_count)} titles` : 'no data yet'}</dd>`;
     const regions = tdb.netflixRegions();
     const sel = $('#region');
     const all = [...new Set([...regions, s.region])];
