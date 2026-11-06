@@ -43,7 +43,7 @@ Phone / Mac ── HTTPS ── Traefik ── screenrate container ── app.s
 - **App files:** static and public. They contain no data and no secrets, so they don't need a login.
 - **Film database:** only downloadable with a valid session. HTTPS replaces the AES encryption, which is removed.
 - **Server:** Node with built-ins only (`node:http`, `node:sqlite`, `node:crypto`). `node:sqlite` is a release candidate in the current Node docs, so check it on the Node version we pick. Fallback is `better-sqlite3`.
-- **Process and TLS:** the VPS has no Node on the host, so the server runs as a Docker container. Traefik already handles ports 80 and 443 and gets certificates by itself. It only needs a domain pointing at the VPS.
+- **Process and TLS:** the VPS has no Node on the host, so the server runs as a Docker container. Traefik already handles ports 80 and 443 and gets certificates by itself. The address is `ratings.localtrails.ch`, a DNS-only record (grey cloud in Cloudflare) pointing at `77.42.39.59`, like `backend.staging.localtrails.ch`.
 
 ## The VPS
 
@@ -93,6 +93,7 @@ settings  (user TEXT PRIMARY KEY, json TEXT)  -- region, filters
 | `GET /api/me` | User, rating count, database version |
 | `GET /data/version`, `GET /data/imdb.sqlite.gz` | Database, login required |
 | `GET /api/ratings` | All of my ratings |
+| `GET /api/ratings/shared` | The other user's ratings, for Movie night |
 | `POST /api/ratings/import` | IMDb CSV, 5 MB limit |
 | `PUT`/`DELETE /api/ratings/:tconst` | Rate in the app |
 | `GET /api/watchlist`, `PUT`/`DELETE /api/watchlist/:tconst` | Watchlist |
@@ -125,7 +126,7 @@ All of this runs on the device, using the film database plus your ratings.
   4. Remove seen titles.
   5. Rank by that score plus IMDb rating, optionally only on Netflix CH.
 - **Taste profile:** favourite genres, directors and actors. This needs a bigger build, because the database only stores the strongest shared person per suggestion.
-- **Movie night, later:** titles neither of you has seen that fit both tastes and are on Netflix. This needs each of you to be able to read the other's ratings.
+- **Movie night:** titles neither of you has seen that fit both tastes and are on Netflix. Marc and Thomas can read each other's ratings; the watchlist and settings stay private. A detail page can also show "Thomas: 9/10".
 
 ## Offline behaviour
 
@@ -173,9 +174,7 @@ Steps 1–3 replace what exists. Steps 4–5 are the new value.
 
 ## Open questions
 
-1. Which domain or subdomain to use, as a plain DNS record pointing at the VPS.
-2. Should Marc and Thomas see each other's ratings? This is needed for Movie night.
-3. One real IMDb ratings CSV, to confirm the columns.
+1. One real IMDb ratings CSV, to confirm the columns (Marc is providing it).
 
 ## Sources
 
