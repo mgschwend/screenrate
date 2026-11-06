@@ -117,7 +117,7 @@ Confirmed with a real export on 2026-11-06. Header:
 
 - `Date Rated` is ISO (`2026-11-05`), and the file has a final empty line.
 - ⚠ Values follow the IMDb account language: `Title Type` was `Fernsehserie` and `Genres` was `Komödie, Thriller`. The import must ignore those columns and use the film database instead.
-- ⚠ That export held a single rating, so "For you" needs more data before it's useful. Rating inside the app is therefore part of the first version, not an extra.
+- ⚠ Marc's IMDb history really is that one rating, so "For you" starts almost empty. Rating inside the app is part of the first version, not an extra. It needs a quick way to rate many known titles, such as a list of popular films to tap through.
 - Ratings can't be written back to IMDb, so an app rating stays in ScreenRate.
 
 ## What this unlocks
@@ -134,6 +134,11 @@ All of this runs on the device, using the film database plus your ratings.
   5. Rank by that score plus IMDb rating, optionally only on Netflix CH.
 - **Taste profile:** favourite genres, directors and actors. This needs a bigger build, because the database only stores the strongest shared person per suggestion.
 - **Movie night:** titles neither of you has seen that fit both tastes and are on Netflix. Marc and Thomas can read each other's ratings; the watchlist and settings stay private. A detail page can also show "Thomas: 9/10".
+
+## UI rules
+
+- **Touch:** every control is at least 44 × 44 px, including small pills, which get an invisible hit area. New controls such as rating stars must meet this too.
+- **Original language (later):** the film's spoken language isn't in the IMDb data or CSV. TMDB has `original_language`. Show it on the detail page from the live lookup first, and add a build step only if filtering by language is wanted.
 
 ## Offline behaviour
 
