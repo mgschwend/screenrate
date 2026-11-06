@@ -30,7 +30,7 @@ services:
     labels:
       traefik.enable: "true"
       traefik.docker.network: trailmap-staging_default
-      traefik.http.routers.screenrate.rule: Host(`ratings.localtrails.ch`)
+      traefik.http.routers.screenrate.rule: Host(`movies.localtrails.ch`)
       traefik.http.routers.screenrate.entrypoints: websecure
       traefik.http.routers.screenrate.tls.certresolver: le
       traefik.http.services.screenrate.loadbalancer.server.port: "8080"

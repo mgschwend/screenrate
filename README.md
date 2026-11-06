@@ -3,7 +3,7 @@
 Private PWA for two people: search any film or series and see its IMDb rating, whether it's on
 Netflix Switzerland, what's like it, and what you'd probably enjoy next.
 
-Runs at https://ratings.localtrails.ch. The design is in [docs/spec-accounts.md](docs/spec-accounts.md),
+Runs at https://movies.localtrails.ch. The design is in [docs/spec-accounts.md](docs/spec-accounts.md),
 and running it on the VPS is in [deploy/README.md](deploy/README.md).
 
 ## How it works

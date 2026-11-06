@@ -43,7 +43,7 @@ Phone / Mac ── HTTPS ── Traefik ── screenrate container ── app.s
 - **App files:** static and public. They contain no data and no secrets, so they don't need a login.
 - **Film database:** only downloadable with a valid session. HTTPS replaces the AES encryption, which is removed.
 - **Server:** Node with built-ins only (`node:http`, `node:sqlite`, `node:crypto`). `node:sqlite` is a release candidate in the current Node docs, so check it on the Node version we pick. Fallback is `better-sqlite3`.
-- **Process and TLS:** the VPS has no Node on the host, so the server runs as a Docker container. Traefik already handles ports 80 and 443 and gets certificates by itself. The address is `ratings.localtrails.ch`, a DNS-only record (grey cloud in Cloudflare) pointing at `77.42.39.59`, like `backend.staging.localtrails.ch`.
+- **Process and TLS:** the VPS has no Node on the host, so the server runs as a Docker container. Traefik already handles ports 80 and 443 and gets certificates by itself. The address is `movies.localtrails.ch`, a DNS-only record (grey cloud in Cloudflare) pointing at `77.42.39.59`, like `backend.staging.localtrails.ch`.
 
 ## The VPS
 
@@ -186,7 +186,7 @@ Steps 1–3 replace what exists. Steps 4–5 are the new value.
 
 ## Open questions
 
-None. DNS record for `ratings.localtrails.ch` is the only prerequisite left.
+None. DNS record for `movies.localtrails.ch` is the only prerequisite left.
 
 ## Sources
 

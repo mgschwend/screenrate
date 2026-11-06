@@ -1,6 +1,6 @@
 # Running ScreenRate on the VPS
 
-The app runs at `https://ratings.localtrails.ch` from `/home/deploy/screenrate`, next to the trailmap
+The app runs at `https://movies.localtrails.ch` from `/home/deploy/screenrate`, next to the trailmap
 staging stack. It uses that stack's Traefik and nothing else from it.
 
 ```
@@ -15,7 +15,7 @@ staging stack. It uses that stack's Traefik and nothing else from it.
 
 ## First setup
 
-1. **DNS:** in Cloudflare, add `ratings.localtrails.ch`, type `A`, value `77.42.39.59`, **DNS only**.
+1. **DNS:** in Cloudflare, add `movies.localtrails.ch`, type `A`, value `77.42.39.59`, **DNS only**.
 2. **Folder**, on the VPS:
 
    ```bash
