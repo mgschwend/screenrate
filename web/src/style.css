@@ -144,6 +144,7 @@ button, input, select, .links a { min-height: 44px; }
 .imdb::after { content: ""; position: absolute; left: -8px; right: -8px; top: 50%; height: 44px; transform: translateY(-50%); }
 .sheet-handle::after { content: ""; position: absolute; left: -60px; right: -60px; top: 50%; height: 44px; transform: translateY(-50%); }
 .toast button { min-width: 44px; }
+.streams a { display: inline-block; padding: .85rem 0; margin: -.85rem 0; } /* taller tap area, same line height */
 
 /* desktop: centred column, tabs on top, detail as a dialog, strips wrap instead of scrolling sideways */
 @media (min-width: 700px) {
