@@ -1,7 +1,7 @@
 import './style.css';
 import { openDatabase, forgetKey } from './dataload.js';
 import { searchTitles, MIN_CHARS } from './search.js';
-import { history, settings, posterCache } from './store.js';
+import { history, settings, posterCache, watchlist } from './store.js';
 import { recommendationsFor, providersFor } from './tmdb.js';
 import { $, toast, renderRows, renderWatchlist, openSheet, closeSheet, setNetflixMarker } from './ui.js';
 
@@ -182,6 +182,13 @@ function renderSettings() {
 
 $('#tmdb-key').addEventListener('change', (e) => { settings.set({ tmdbKey: e.target.value.trim() }); posterCache.clear(); toast('Saved'); });
 $('#region').addEventListener('change', (e) => { settings.set({ region: e.target.value }); loadNetflix(); renderSettings(); showResults(); });
+$('#export-watchlist').addEventListener('click', () => {
+  const rows = watchlist.all().map(({ tconst, addedAt }) => ({ tconst, addedAt }));
+  const url = URL.createObjectURL(new Blob([JSON.stringify(rows)], { type: 'application/json' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: 'screenrate-watchlist.json' });
+  a.click();
+  URL.revokeObjectURL(url);
+});
 $('#clear-history').addEventListener('click', () => { history.clear(); renderSettings(); showResults(); toast('Cleared'); });
 $('#lock').addEventListener('click', async () => { await forgetKey(); location.reload(); });
 $('#update-data').addEventListener('click', () => refreshData({ quiet: false }));
