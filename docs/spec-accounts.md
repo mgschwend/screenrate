@@ -128,7 +128,7 @@ All of this runs on the device, using the film database plus your ratings.
 
 IMDb allows "personal and non-commercial" use, and forbids republishing or repurposing the data except for individual personal use. It can withdraw permission at any time.
 
-⚠ A login keeps the data private, which helps, but serving it to a second person is a grey area. Thomas using it is your decision. The IMDb credit stays, and so do the JustWatch and TMDB credits.
+Decision: Thomas is Marc's flatmate, so this counts as personal household use. The app stays private behind the login and limited to the two of them. The IMDb credit stays, and so do the JustWatch and TMDB credits.
 
 ## Moving over
 
@@ -160,7 +160,6 @@ Steps 1–3 replace what exists. Steps 4–5 are the new value.
 2. Which domain or subdomain to use.
 3. Should Marc and Thomas see each other's ratings? This is needed for Movie night.
 4. One real IMDb ratings CSV, to confirm the columns.
-5. Is it fine for Thomas to use the app, given the licence wording?
 
 ## Sources
 
